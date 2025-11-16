@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
@@ -32,6 +32,7 @@ import {
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
+import { useMenuItems, useMenuCategories, useReservations, useTakeoutOrders } from '../lib/firebase-hooks';
 import {
   BarChart3,
   TrendingUp,
@@ -122,7 +123,7 @@ type TableShape =
   | "u-shape"
   | "l-shape";
 type TableStatus = "available" | "reserved" | "occupied";
-type ReservationStatus = "waiting" | "seated" | "completed";
+type ReservationStatus = "waiting" | "seated" | "completed" | "cancelled";
 type OrderStatus =
   | "pending"
   | "confirmed"
@@ -672,7 +673,6 @@ const mockTakeoutOrders: TakeoutOrder[] = [
     pickupTime: "2025-10-21T19:45:00Z",
   },
 ];
-
 
 const defaultHours: HoursOfOperation[] = [
   {
@@ -1276,7 +1276,7 @@ function PannableCanvas({
 }
 
 // ===== MAIN COMPONENT =====
-export function ManagerApp() {
+export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   const [timeRange, setTimeRange] = useState("month");
   const [selectedFloor, setSelectedFloor] =
     useState<Floor | null>(mockFloors[0]);
@@ -1291,15 +1291,10 @@ export function ManagerApp() {
     useState<Floor | null>(null);
   const [floorName, setFloorName] = useState("");
   const [floors, setFloors] = useState<Floor[]>(mockFloors);
-  const [reservations, setReservations] = useState<
-    Reservation[]
-  >(recentReservations);
-  const [waitlist, setWaitlist] =
-    useState<WaitlistGuest[]>(mockWaitlist);
-  const [menu, setMenu] = useState<MenuItem[]>(mockMenu);
-  const [takeoutOrders, setTakeoutOrders] = useState<
-    TakeoutOrder[]
-  >(mockTakeoutOrders);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [waitlist, setWaitlist] = useState<WaitlistGuest[]>(isDemo ? mockWaitlist : []);
+  const [menu, setMenu] = useState<MenuItem[]>([]);
+  const [takeoutOrders, setTakeoutOrders] = useState<TakeoutOrder[]>([]);
   const [scale, setScale] = useState(0.7);
   const [hours, setHours] =
     useState<HoursOfOperation[]>(defaultHours);
@@ -1307,18 +1302,79 @@ export function ManagerApp() {
     useState<MenuItem | null>(null);
   const [isMenuDialogOpen, setIsMenuDialogOpen] =
     useState(false);
-  const [menuCategories] = useState([
-    "Starters",
-    "Entrees",
-    "Desserts",
-    "Beverages",
-  ]);
+  const [menuCategories, setMenuCategories] = useState<string[]>([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [showAddCategory, setShowAddCategory] = useState(false);
   const [dineInView, setDineInView] = useState<
     "floor" | "list"
   >("floor");
   const selectedDate = new Date();
   const [selectedReservation, setSelectedReservation] =
     useState<Reservation | WaitlistGuest | null>(null);
+
+  // Firebase integration
+  const firebaseMenuItems = useMenuItems();
+  const firebaseCategories = useMenuCategories();
+  const firebaseReservations = useReservations();
+  const firebaseTakeoutOrders = useTakeoutOrders();
+
+  // Load menu items from Firebase (only in realtime mode)
+  useEffect(() => {
+    if (!isDemo && !firebaseMenuItems.loading && firebaseMenuItems.menuItems.length > 0) {
+      const convertedItems = firebaseMenuItems.menuItems.map(item => ({
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        price: item.price,
+        description: item.description,
+        image: item.image || '/api/placeholder/400/300',
+        available: item.available,
+        dietary: item.dietary || [],
+        popular: item.popular || false,
+      }));
+      setMenu(convertedItems);
+    } else if (!isDemo && !firebaseMenuItems.loading) {
+      // No data - set to empty array
+      setMenu([]);
+    } else if (isDemo) {
+      // Demo mode - use mock data
+      setMenu(mockMenu);
+    }
+  }, [firebaseMenuItems.menuItems, firebaseMenuItems.loading, isDemo]);
+
+  // Load categories from Firebase (only in realtime mode)
+  useEffect(() => {
+    if (!isDemo && !firebaseCategories.loading && firebaseCategories.categories.length > 0) {
+      const categoryNames = firebaseCategories.categories.map(cat => cat.name);
+      setMenuCategories(categoryNames);
+    } else if (!isDemo && !firebaseCategories.loading) {
+      // No data - set to empty array
+      setMenuCategories([]);
+    } else if (isDemo) {
+      // Demo mode - use default categories
+      setMenuCategories(["Starters", "Entrees", "Desserts", "Beverages"]);
+    }
+  }, [firebaseCategories.categories, firebaseCategories.loading, isDemo]);
+
+  // Load reservations from Firebase (only in realtime mode)
+  useEffect(() => {
+    if (!isDemo && !firebaseReservations.loading) {
+      setReservations(firebaseReservations.reservations);
+    } else if (isDemo) {
+      // Demo mode - use mock data
+      setReservations(recentReservations);
+    }
+  }, [firebaseReservations.reservations, firebaseReservations.loading, isDemo]);
+
+  // Load takeout orders from Firebase (only in realtime mode)
+  useEffect(() => {
+    if (!isDemo && !firebaseTakeoutOrders.loading) {
+      setTakeoutOrders(firebaseTakeoutOrders.takeoutOrders);
+    } else if (isDemo) {
+      // Demo mode - use mock data
+      setTakeoutOrders(mockTakeoutOrders);
+    }
+  }, [firebaseTakeoutOrders.takeoutOrders, firebaseTakeoutOrders.loading, isDemo]);
 
   // Restaurant listing state
   const [restaurantInfo, setRestaurantInfo] = useState({
@@ -1330,8 +1386,8 @@ export function ManagerApp() {
     phone: "(555) 123-4567",
     email: "info@thereserve.com",
     priceLevel: 3,
-    rating: 4.7,
-    reviews: 342,
+    rating: 0,
+    reviews: 0,
     features: [
       "Outdoor Seating",
       "Full Bar",
@@ -1353,18 +1409,97 @@ export function ManagerApp() {
       takeoutOrderMinimum: 15,
     });
 
-  const stats = {
-    totalRevenue: 74000,
-    revenueChange: 12.5,
-    totalReservations: 391,
-    reservationsChange: 8.3,
-    avgReservationValue: 189,
-    avgValueChange: 5.2,
-    customerSatisfaction: 4.7,
-    satisfactionChange: 3.1,
-    takeoutOrders: 287,
-    takeoutChange: 15.8,
-  };
+  // Calculate stats based on mode (demo vs realtime)
+  const stats = isDemo
+    ? {
+        totalRevenue: 74000,
+        revenueChange: 12.5,
+        totalReservations: 391,
+        reservationsChange: 8.3,
+        avgReservationValue: 189,
+        avgValueChange: 5.2,
+        customerSatisfaction: 4.7,
+        satisfactionChange: 3.1,
+        takeoutOrders: 287,
+        takeoutChange: 15.8,
+      }
+    : {
+        totalRevenue: takeoutOrders.reduce((sum, o) => sum + o.total, 0),
+        revenueChange: 0, // TODO: Calculate based on historical data
+        totalReservations: reservations.length,
+        reservationsChange: 0, // TODO: Calculate based on historical data
+        avgReservationValue: 0, // Reservations don't track revenue
+        avgValueChange: 0, // TODO: Calculate based on historical data
+        customerSatisfaction: restaurantInfo.rating,
+        satisfactionChange: 0, // TODO: Calculate based on historical data
+        takeoutOrders: takeoutOrders.filter(o => o.status !== 'cancelled').length,
+        takeoutChange: 0, // TODO: Calculate based on historical data
+      };
+
+  // Calculate chart data based on mode (demo vs realtime)
+  const chartRevenueData = isDemo
+    ? revenueData
+    : [
+        { month: "This Month", revenue: takeoutOrders.reduce((sum, o) => sum + o.total, 0), dineIn: 0, takeout: takeoutOrders.reduce((sum, o) => sum + o.total, 0) }
+      ];
+
+  const chartReservationSources = isDemo
+    ? reservationSources
+    : (() => {
+        if (reservations.length === 0) return [];
+        // Calculate from real reservations data
+        const sourceCounts: Record<string, number> = {};
+        reservations.forEach(() => {
+          // Since reservations don't have source field, we'll default to "Online"
+          sourceCounts["Online"] = (sourceCounts["Online"] || 0) + 1;
+        });
+        
+        const total = reservations.length || 1;
+        return Object.entries(sourceCounts).map(([name, count], idx) => ({
+          name,
+          value: Math.round((count / total) * 100),
+          color: ["#3b82f6", "#06b6d4", "#8b5cf6", "#10b981"][idx % 4]
+        }));
+      })();
+
+  const chartPopularTimes = isDemo
+    ? popularTimes
+    : (() => {
+        if (reservations.length === 0) return [];
+        // Calculate from real reservations data
+        const hourCounts: Record<string, number> = {};
+        reservations.forEach(r => {
+          const hour = new Date(r.time).getHours();
+          const hourLabel = `${hour % 12 || 12} ${hour >= 12 ? 'PM' : 'AM'}`;
+          hourCounts[hourLabel] = (hourCounts[hourLabel] || 0) + 1;
+        });
+        
+        return Object.entries(hourCounts)
+          .map(([hour, bookings]) => ({ hour, bookings }))
+          .sort((a, b) => parseInt(a.hour) - parseInt(b.hour));
+      })();
+
+  const chartTopDishes = isDemo
+    ? topDishes
+    : (() => {
+        if (takeoutOrders.length === 0) return [];
+        // Calculate from takeout orders
+        const dishCounts: Record<string, { orders: number; revenue: number }> = {};
+        takeoutOrders.forEach(order => {
+          order.items.forEach(item => {
+            if (!dishCounts[item.name]) {
+              dishCounts[item.name] = { orders: 0, revenue: 0 };
+            }
+            dishCounts[item.name].orders += item.quantity;
+            dishCounts[item.name].revenue += item.price * item.quantity;
+          });
+        });
+        
+        return Object.entries(dishCounts)
+          .map(([name, data]) => ({ name, ...data }))
+          .sort((a, b) => b.orders - a.orders)
+          .slice(0, 5);
+      })();
 
   const handleSaveRestaurantInfo = () => {
     toast.success(
@@ -1704,35 +1839,88 @@ export function ManagerApp() {
     setIsMenuDialogOpen(true);
   };
 
-  const handleSaveMenuItem = () => {
+  const handleAddCategory = async () => {
+    if (newCategoryName.trim() && !menuCategories.includes(newCategoryName.trim())) {
+      try {
+        await firebaseCategories.createCategory({
+          name: newCategoryName.trim(),
+          description: '',
+          order: menuCategories.length,
+        });
+        setNewCategoryName("");
+        setShowAddCategory(false);
+        toast.success(`Category "${newCategoryName.trim()}" added successfully`);
+      } catch (error) {
+        console.error('Failed to add category:', error);
+        toast.error('Failed to add category');
+      }
+    } else if (menuCategories.includes(newCategoryName.trim())) {
+      toast.error("Category already exists");
+    }
+  };
+
+  const handleSaveMenuItem = async () => {
     if (!selectedMenuItem) return;
 
-    if (selectedMenuItem.id) {
-      // Update existing
-      setMenu(
-        menu.map((item) =>
-          item.id === selectedMenuItem.id
-            ? selectedMenuItem
-            : item,
-        ),
-      );
-      toast.success("Menu item updated");
+    if (selectedMenuItem.id && selectedMenuItem.id.startsWith('m-')) {
+      // Update existing item
+      await handleFirebaseUpdateMenuItem(selectedMenuItem.id, {
+        name: selectedMenuItem.name,
+        description: selectedMenuItem.description,
+        price: selectedMenuItem.price,
+        category: selectedMenuItem.category,
+        image: selectedMenuItem.image,
+        available: selectedMenuItem.available,
+        dietary: selectedMenuItem.dietary,
+        popular: selectedMenuItem.popular,
+      });
     } else {
-      // Add new
-      const newItem = {
-        ...selectedMenuItem,
-        id: `m-${Date.now()}`,
-      };
-      setMenu([...menu, newItem]);
-      toast.success("Menu item added");
+      // Add new item
+      await handleFirebaseAddMenuItem(selectedMenuItem);
     }
     setIsMenuDialogOpen(false);
     setSelectedMenuItem(null);
   };
 
-  const handleDeleteMenuItem = (itemId: string) => {
-    setMenu(menu.filter((item) => item.id !== itemId));
-    toast.success("Menu item deleted");
+  const handleDeleteMenuItem = async (itemId: string) => {
+    try {
+      await firebaseMenuItems.deleteMenuItem(itemId);
+      // Real-time subscription will update the state
+    } catch (error) {
+      console.error('Failed to delete menu item:', error);
+      toast.error('Failed to delete menu item');
+    }
+  };
+
+  // Firebase: Add menu item
+  const handleFirebaseAddMenuItem = async (itemData: Partial<MenuItem>) => {
+    try {
+      await firebaseMenuItems.createMenuItem({
+        name: itemData.name || 'Untitled',
+        description: itemData.description || '',
+        price: parseFloat(String(itemData.price)) || 0,
+        category: itemData.category || 'Uncategorized',
+        image: itemData.image,
+        available: itemData.available !== false,
+        dietary: itemData.dietary || [],
+        popular: itemData.popular || false,
+      });
+      toast.success('Menu item added');
+    } catch (error) {
+      console.error('Failed to add menu item:', error);
+      toast.error('Failed to add menu item');
+    }
+  };
+
+  // Firebase: Update menu item
+  const handleFirebaseUpdateMenuItem = async (itemId: string, updates: Partial<MenuItem>) => {
+    try {
+      await firebaseMenuItems.updateMenuItem(itemId, updates);
+      toast.success('Menu item updated');
+    } catch (error) {
+      console.error('Failed to update menu item:', error);
+      toast.error('Failed to update menu item');
+    }
   };
 
   const getOrderStatusColor = (status: OrderStatus) => {
@@ -1955,7 +2143,7 @@ export function ManagerApp() {
                       </Badge>
                     </div>
                     <div className="text-2xl sm:text-3xl text-slate-100 mb-1">
-                      {stats.customerSatisfaction}
+                      {stats.customerSatisfaction > 0 ? stats.customerSatisfaction : "—"}
                     </div>
                     <div className="text-sm text-slate-400">
                       Customer Rating
@@ -1972,39 +2160,47 @@ export function ManagerApp() {
                     <BarChart3 className="w-5 h-5 text-blue-400" />
                     Revenue by Channel
                   </h3>
-                  <ResponsiveContainer
-                    width="100%"
-                    height={250}
-                  >
-                    <BarChart data={revenueData}>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="#334155"
-                      />
-                      <XAxis dataKey="month" stroke="#94a3b8" />
-                      <YAxis stroke="#94a3b8" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#1e293b",
-                          border: "1px solid #334155",
-                          borderRadius: "8px",
-                        }}
-                      />
-                      <Legend />
-                      <Bar
-                        dataKey="reservations"
-                        name="Dine-In"
-                        fill="#3b82f6"
-                        radius={[8, 8, 0, 0]}
-                      />
-                      <Bar
-                        dataKey="takeout"
-                        name="Takeout"
-                        fill="#8b5cf6"
-                        radius={[8, 8, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {chartRevenueData.length > 0 && chartRevenueData.some(d => ('dineIn' in d && d.dineIn > 0) || ('takeout' in d && d.takeout > 0)) ? (
+                    <ResponsiveContainer
+                      width="100%"
+                      height={250}
+                    >
+                      <BarChart data={chartRevenueData}>
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="#334155"
+                        />
+                        <XAxis dataKey="month" stroke="#94a3b8" />
+                        <YAxis stroke="#94a3b8" />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#1e293b",
+                            border: "1px solid #334155",
+                            borderRadius: "8px",
+                          }}
+                        />
+                        <Legend />
+                        <Bar
+                          dataKey="reservations"
+                          name="Dine-In"
+                          fill="#3b82f6"
+                          radius={[8, 8, 0, 0]}
+                        />
+                        <Bar
+                          dataKey="takeout"
+                          name="Takeout"
+                          fill="#8b5cf6"
+                          radius={[8, 8, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-[250px] text-slate-400">
+                      <BarChart3 className="w-12 h-12 mb-3 opacity-30" />
+                      <p className="text-sm">No revenue data yet</p>
+                      <p className="text-xs mt-1 opacity-70">Chart will appear when orders are placed</p>
+                    </div>
+                  )}
                 </Card>
 
                 {/* Reservation Sources */}
@@ -2013,41 +2209,49 @@ export function ManagerApp() {
                     <Target className="w-5 h-5 text-cyan-400" />
                     Reservation Sources
                   </h3>
-                  <ResponsiveContainer
-                    width="100%"
-                    height={250}
-                  >
-                    <PieChart>
-                      <Pie
-                        data={reservationSources}
-                        cx="50%"
-                        cy="50%"
-                        labelLine={false}
-                        label={({ name, value }) =>
-                          `${name}: ${value}%`
-                        }
-                        outerRadius={80}
-                        fill="#8884d8"
-                        dataKey="value"
-                      >
-                        {reservationSources.map(
-                          (entry, index) => (
-                            <Cell
-                              key={`cell-${index}`}
-                              fill={entry.color}
-                            />
-                          ),
-                        )}
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#1e293b",
-                          border: "1px solid #334155",
-                          borderRadius: "8px",
-                        }}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  {chartReservationSources.length > 0 ? (
+                    <ResponsiveContainer
+                      width="100%"
+                      height={250}
+                    >
+                      <PieChart>
+                        <Pie
+                          data={chartReservationSources}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, value }) =>
+                            `${name}: ${value}%`
+                          }
+                          outerRadius={80}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {reservationSources.map(
+                            (entry, index) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={entry.color}
+                              />
+                            ),
+                          )}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#1e293b",
+                            border: "1px solid #334155",
+                            borderRadius: "8px",
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-[250px] text-slate-400">
+                      <Target className="w-12 h-12 mb-3 opacity-30" />
+                      <p className="text-sm">No reservation data yet</p>
+                      <p className="text-xs mt-1 opacity-70">Chart will appear when reservations are added</p>
+                    </div>
+                  )}
                 </Card>
               </div>
             </TabsContent>
@@ -3628,11 +3832,13 @@ export function ManagerApp() {
                               <div className="flex items-center gap-1">
                                 <Star className="w-4 h-4 text-yellow-400 fill-yellow-400" />
                                 <span className="text-slate-100">
-                                  {restaurantInfo.rating}
+                                  {restaurantInfo.rating > 0 ? restaurantInfo.rating : "—"}
                                 </span>
-                                <span className="text-slate-400 text-sm">
-                                  ({restaurantInfo.reviews})
-                                </span>
+                                {restaurantInfo.reviews > 0 && (
+                                  <span className="text-slate-400 text-sm">
+                                    ({restaurantInfo.reviews})
+                                  </span>
+                                )}
                               </div>
                             </div>
 
@@ -4022,31 +4228,39 @@ export function ManagerApp() {
                     <Clock className="w-5 h-5 text-blue-400" />
                     Peak Booking Hours
                   </h3>
-                  <ResponsiveContainer
-                    width="100%"
-                    height={250}
-                  >
-                    <BarChart data={popularTimes}>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="#334155"
-                      />
-                      <XAxis dataKey="hour" stroke="#94a3b8" />
-                      <YAxis stroke="#94a3b8" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#1e293b",
-                          border: "1px solid #334155",
-                          borderRadius: "8px",
-                        }}
-                      />
-                      <Bar
-                        dataKey="bookings"
-                        fill="#06b6d4"
-                        radius={[8, 8, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {chartPopularTimes.length > 0 && chartPopularTimes.some(t => t.bookings > 0) ? (
+                    <ResponsiveContainer
+                      width="100%"
+                      height={250}
+                    >
+                      <BarChart data={chartPopularTimes}>
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="#334155"
+                        />
+                        <XAxis dataKey="hour" stroke="#94a3b8" />
+                        <YAxis stroke="#94a3b8" />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#1e293b",
+                            border: "1px solid #334155",
+                            borderRadius: "8px",
+                          }}
+                        />
+                        <Bar
+                          dataKey="bookings"
+                          fill="#06b6d4"
+                          radius={[8, 8, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-[250px] text-slate-400">
+                      <Clock className="w-12 h-12 mb-3 opacity-30" />
+                      <p className="text-sm">No booking data yet</p>
+                      <p className="text-xs mt-1 opacity-70">Chart will appear when reservations are made</p>
+                    </div>
+                  )}
                 </Card>
 
                 {/* Monthly Comparison */}
@@ -4055,31 +4269,39 @@ export function ManagerApp() {
                     <TrendingUp className="w-5 h-5 text-green-400" />
                     Monthly Comparison
                   </h3>
-                  <ResponsiveContainer
-                    width="100%"
-                    height={250}
-                  >
-                    <BarChart data={revenueData.slice(-6)}>
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="#334155"
-                      />
-                      <XAxis dataKey="month" stroke="#94a3b8" />
-                      <YAxis stroke="#94a3b8" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#1e293b",
-                          border: "1px solid #334155",
-                          borderRadius: "8px",
-                        }}
-                      />
-                      <Bar
-                        dataKey="reservations"
-                        fill="#8b5cf6"
-                        radius={[8, 8, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {revenueData.length > 0 && revenueData.some(d => d.reservations > 0) ? (
+                    <ResponsiveContainer
+                      width="100%"
+                      height={250}
+                    >
+                      <BarChart data={revenueData.slice(-6)}>
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="#334155"
+                        />
+                        <XAxis dataKey="month" stroke="#94a3b8" />
+                        <YAxis stroke="#94a3b8" />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#1e293b",
+                            border: "1px solid #334155",
+                            borderRadius: "8px",
+                          }}
+                        />
+                        <Bar
+                          dataKey="reservations"
+                          fill="#8b5cf6"
+                          radius={[8, 8, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-[250px] text-slate-400">
+                      <TrendingUp className="w-12 h-12 mb-3 opacity-30" />
+                      <p className="text-sm">No monthly data yet</p>
+                      <p className="text-xs mt-1 opacity-70">Chart will appear when reservations accumulate</p>
+                    </div>
+                  )}
                 </Card>
               </div>
 
@@ -4089,38 +4311,46 @@ export function ManagerApp() {
                   <Award className="w-5 h-5 text-yellow-400" />
                   Top Performing Dishes
                 </h3>
-                <div className="space-y-3 sm:space-y-4">
-                  {topDishes.map((dish, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between p-3 sm:p-4 bg-slate-700/50 rounded-lg"
-                    >
-                      <div className="flex items-center gap-3 sm:gap-4">
-                        <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-yellow-500 to-orange-500 rounded-lg flex items-center justify-center">
-                          <span className="text-white text-sm sm:text-base">
-                            #{index + 1}
-                          </span>
+                {chartTopDishes.length > 0 ? (
+                  <div className="space-y-3 sm:space-y-4">
+                    {chartTopDishes.map((dish, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-3 sm:p-4 bg-slate-700/50 rounded-lg"
+                      >
+                        <div className="flex items-center gap-3 sm:gap-4">
+                          <div className="w-8 h-8 sm:w-10 sm:h-10 bg-gradient-to-br from-yellow-500 to-orange-500 rounded-lg flex items-center justify-center">
+                            <span className="text-white text-sm sm:text-base">
+                              #{index + 1}
+                            </span>
+                          </div>
+                          <div>
+                            <div className="text-slate-100">
+                              {dish.name}
+                            </div>
+                            <div className="text-sm text-slate-400">
+                              {dish.orders} orders
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="text-slate-100">
-                            {dish.name}
+                        <div className="text-right">
+                          <div className="text-base sm:text-lg text-green-400">
+                            ${dish.revenue.toLocaleString()}
                           </div>
                           <div className="text-sm text-slate-400">
-                            {dish.orders} orders
+                            Revenue
                           </div>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-base sm:text-lg text-green-400">
-                          ${dish.revenue.toLocaleString()}
-                        </div>
-                        <div className="text-sm text-slate-400">
-                          Revenue
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                    <Award className="w-12 h-12 mb-3 opacity-30" />
+                    <p className="text-sm">No order data yet</p>
+                    <p className="text-xs mt-1 opacity-70">Top dishes will appear when orders are placed</p>
+                  </div>
+                )}
               </Card>
             </TabsContent>
 
@@ -4829,12 +5059,62 @@ export function ManagerApp() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label
-                    htmlFor="itemCategory"
-                    className="text-slate-200"
-                  >
-                    Category
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label
+                      htmlFor="itemCategory"
+                      className="text-slate-200"
+                    >
+                      Category
+                    </Label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowAddCategory(!showAddCategory)}
+                      className="text-blue-400 hover:text-blue-300 h-auto p-1"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Add New
+                    </Button>
+                  </div>
+                  
+                  {showAddCategory && (
+                    <div className="flex gap-2 p-3 bg-slate-700/30 rounded-lg border border-slate-600">
+                      <Input
+                        placeholder="New category name..."
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddCategory();
+                          }
+                        }}
+                        className="bg-slate-700 border-slate-600 text-slate-100"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleAddCategory}
+                        className="bg-blue-600 hover:bg-blue-700"
+                      >
+                        Add
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setShowAddCategory(false);
+                          setNewCategoryName("");
+                        }}
+                        className="border-slate-600"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                  
                   <Select
                     value={selectedMenuItem.category}
                     onValueChange={(value) =>

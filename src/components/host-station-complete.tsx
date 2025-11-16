@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { DndProvider, useDrag, useDrop, type DragSourceMonitor, type DropTargetMonitor } from 'react-dnd';
+import { DndProvider, useDrag, useDrop } from 'react-dnd';
+import type { DragSourceMonitor, DropTargetMonitor } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
@@ -15,13 +16,13 @@ import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Separator } from './ui/separator';
 import { toast } from 'sonner';
+import { useGuests, useTables, useMessages } from '../lib/firebase-hooks';
 import {
   LayoutDashboard,
   List,
   LayoutGrid,
   MessageSquare,
   Settings,
-  Search,
   Filter,
   Users,
   Clock,
@@ -33,15 +34,16 @@ import {
   X,
   Trash2,
   Check,
-  AlertCircle,
   TrendingUp,
   User,
-  ChevronRight,
   Grid3x3,
   CircleDot,
   CheckCircle2,
   Utensils,
   Timer,
+  AlertCircle,
+  ChevronRight,
+  Search,
 } from 'lucide-react';
 
 // Types
@@ -527,7 +529,7 @@ function DroppableSection({ status, title, icon, guests, onDrop, onGuestClick }:
 };
 
 // Main Component
-export default function HostStationComplete() {
+export default function HostStationComplete({ isDemo = false }: { isDemo?: boolean }) {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -542,6 +544,8 @@ export default function HostStationComplete() {
   const [previewMessage, setPreviewMessage] = useState('');
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [guestToRemove, setGuestToRemove] = useState<Guest | null>(null);
+  const [showGuestSelector, setShowGuestSelector] = useState(false);
+  const [messagingGuest, setMessagingGuest] = useState<Guest | null>(null);
   const [restaurantInfo, setRestaurantInfo] = useState({
     name: 'Bella Vista',
     phone: '(555) 123-4567',
@@ -560,10 +564,95 @@ export default function HostStationComplete() {
   const [guestToSeat, setGuestToSeat] = useState<Guest | null>(null);
   const [tableToSeat, setTableToSeat] = useState<Table | null>(null);
 
+  // Firebase integration
+  const firebaseGuests = useGuests();
+  const firebaseTables = useTables();
+  const firebaseMessages = useMessages();
+
+  // Helper function to convert Firebase Guest to component Guest type
+  const convertFirebaseGuest = (fbGuest: typeof firebaseGuests.guests[0]): Guest => {
+    // Map Firebase status to component status
+    const statusMap: Record<string, Guest['status']> = {
+      'waiting': 'waiting',
+      'confirmed': 'reserved',
+      'seated': 'seated',
+      'completed': 'completed',
+      'cancelled': 'waiting',
+      'no-show': 'waiting',
+    };
+
+    return {
+      id: fbGuest.id,
+      name: fbGuest.name,
+      phone: fbGuest.phone,
+      email: fbGuest.email || '',
+      partySize: fbGuest.partySize,
+      status: statusMap[fbGuest.status] || 'waiting',
+      tableNumber: fbGuest.tableNumber,
+      arrivalTime: fbGuest.createdAt,
+      reservationTime: fbGuest.reservationTime,
+      specialRequests: fbGuest.specialRequests,
+      source: fbGuest.source,
+      waitTime: fbGuest.waitTime,
+      notified: fbGuest.notified,
+    };
+  };
+
+  // Helper function to convert Firebase Table to component Table type
+  const convertFirebaseTable = (fbTable: typeof firebaseTables.tables[0]): Table => {
+    return {
+      id: parseInt(fbTable.id.replace(/\D/g, ''), 10) || Math.floor(Math.random() * 1000),
+      number: fbTable.number,
+      capacity: fbTable.capacity,
+      status: fbTable.status,
+      section: fbTable.section,
+      position: fbTable.position,
+      currentGuest: fbTable.currentGuest,
+      shape: fbTable.shape,
+      floor: fbTable.floor,
+    };
+  };
+
+  // Load data from Firebase or use mock data in demo mode
   useEffect(() => {
-    setGuests(generateMockGuests());
-    setTables(generateMockTables());
-  }, []);
+    if (isDemo) {
+      // Demo mode - use mock data
+      setGuests(generateMockGuests());
+    } else if (!firebaseGuests.loading) {
+      // Realtime mode - use Firebase data (empty array if no data)
+      if (firebaseGuests.guests.length > 0) {
+        const convertedGuests = firebaseGuests.guests.map(convertFirebaseGuest);
+        setGuests(convertedGuests);
+      } else {
+        setGuests([]);
+      }
+    }
+  }, [firebaseGuests.guests, firebaseGuests.loading, isDemo]);
+
+  useEffect(() => {
+    if (isDemo) {
+      // Demo mode - use mock data
+      setTables(generateMockTables());
+    } else if (!firebaseTables.loading) {
+      // Realtime mode - use Firebase data (empty array if no data)
+      if (firebaseTables.tables.length > 0) {
+        const convertedTables = firebaseTables.tables.map(convertFirebaseTable);
+        setTables(convertedTables);
+      } else {
+        setTables([]);
+      }
+    }
+  }, [firebaseTables.tables, firebaseTables.loading, isDemo]);
+
+  useEffect(() => {
+    if (isDemo) {
+      // Demo mode - no messages
+      setMessages([]);
+    } else if (!firebaseMessages.loading) {
+      // Realtime mode - use Firebase data (empty array if no data)
+      setMessages(firebaseMessages.messages);
+    }
+  }, [firebaseMessages.messages, firebaseMessages.loading, isDemo]);
 
   const handleDrop = (guestId: string, newStatus: Guest['status']) => {
     setGuests(guests.map(g => {
@@ -616,30 +705,18 @@ export default function HostStationComplete() {
     setShowMessagePreview(true);
   };
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!previewGuest) return;
 
-    const message: Message = {
-      id: `msg-${Date.now()}`,
-      guestId: previewGuest.id,
-      guestName: previewGuest.name,
-      phone: previewGuest.phone,
-      message: previewMessage,
-      timestamp: new Date().toISOString(),
-      sent: true,
-    };
+    // Use Firebase to send message
+    await handleFirebaseSendMessage(previewGuest, previewMessage);
 
-    setMessages([message, ...messages]);
-    setGuests(guests.map(g => 
-      g.id === previewGuest.id ? { ...g, notified: true } : g
-    ));
-    
-    toast.success(`Message sent to ${previewGuest.name}`);
+    // Update guest notification status
+    await handleFirebaseUpdateGuest(previewGuest.id, { notified: true });
+
     setShowMessagePreview(false);
     setPreviewGuest(null);
     setPreviewMessage('');
-    setMessageText('');
-    setSelectedTemplate('');
   };
 
   const handleRemoveFromQueue = (guest: Guest) => {
@@ -647,11 +724,12 @@ export default function HostStationComplete() {
     setShowRemoveConfirm(true);
   };
 
-  const confirmRemoveFromQueue = () => {
+  const confirmRemoveFromQueue = async () => {
     if (!guestToRemove) return;
     
-    setGuests(guests.filter(g => g.id !== guestToRemove.id));
-    toast.success(`${guestToRemove.name} has been removed from the queue`);
+    // Use Firebase to delete guest
+    await handleFirebaseDeleteGuest(guestToRemove.id);
+    
     setShowRemoveConfirm(false);
     setGuestToRemove(null);
   };
@@ -667,21 +745,12 @@ export default function HostStationComplete() {
     }
   };
 
-  const confirmSeatGuest = () => {
+  const confirmSeatGuest = async () => {
     if (!guestToSeat || !tableToSeat) return;
 
-    setGuests(guests.map(g => 
-      g.id === guestToSeat.id 
-        ? { ...g, status: 'seated', tableNumber: tableToSeat.number, seatedTime: new Date().toISOString() }
-        : g
-    ));
-    setTables(tables.map(t => 
-      t.number === tableToSeat.number
-        ? { ...t, status: 'occupied', currentGuest: guestToSeat.id }
-        : t
-    ));
+    // Use Firebase to seat guest - convert table ID to string for Firebase
+    await handleFirebaseSeatGuest(guestToSeat.id, tableToSeat.id.toString(), tableToSeat.number);
     
-    toast.success(`${guestToSeat.name} seated at Table ${tableToSeat.number}`);
     setShowSeatConfirm(false);
     setGuestToSeat(null);
     setTableToSeat(null);
@@ -694,6 +763,72 @@ export default function HostStationComplete() {
 
   const handleRefreshFloorPlan = () => {
     toast.success('Floor plan refreshed');
+  };
+
+  // Firebase: Update guest status
+  const handleFirebaseUpdateGuest = async (guestId: string, updates: Partial<typeof firebaseGuests.guests[0]>) => {
+    try {
+      await firebaseGuests.updateGuest(guestId, updates);
+      toast.success('Guest updated');
+    } catch (error) {
+      console.error('Failed to update guest:', error);
+      toast.error('Failed to update guest');
+    }
+  };
+
+  // Firebase: Seat guest at table
+  const handleFirebaseSeatGuest = async (guestId: string, tableId: string, tableNumber: number) => {
+    try {
+      // Update guest
+      await firebaseGuests.updateGuest(guestId, {
+        status: 'seated',
+        tableNumber: tableNumber,
+      });
+      
+      // Update table
+      await firebaseTables.updateTable(tableId, {
+        status: 'occupied',
+        currentGuest: guestId,
+      });
+      
+      toast.success('Guest seated successfully');
+    } catch (error) {
+      console.error('Failed to seat guest:', error);
+      toast.error('Failed to seat guest');
+    }
+  };
+
+  // Firebase: Send message to guest
+  const handleFirebaseSendMessage = async (guest: Guest, message: string) => {
+    try {
+      await firebaseMessages.sendMessage({
+        guestId: guest.id,
+        guestName: guest.name,
+        phone: guest.phone,
+        message: message,
+        timestamp: new Date().toISOString(),
+        sent: true,
+        template: selectedTemplate || undefined,
+      });
+      
+      setMessageText('');
+      setSelectedTemplate('');
+      toast.success('Message sent to ' + guest.name);
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      toast.error('Failed to send message');
+    }
+  };
+
+  // Firebase: Delete guest
+  const handleFirebaseDeleteGuest = async (guestId: string) => {
+    try {
+      await firebaseGuests.deleteGuest(guestId);
+      toast.success('Guest removed');
+    } catch (error) {
+      console.error('Failed to remove guest:', error);
+      toast.error('Failed to remove guest');
+    }
   };
 
   const waitlistGuests = guests.filter(g => g.status === 'waiting');
@@ -721,6 +856,7 @@ export default function HostStationComplete() {
       ? Math.round(waitlistGuests.reduce((acc, g) => acc + (g.waitTime || 0), 0) / waitlistGuests.length)
       : 0,
   };
+
 
 
   return (
@@ -1155,29 +1291,24 @@ export default function HostStationComplete() {
                   </h3>
 
                   <div className="space-y-4">
-                    <div>
+                    <div className="space-y-2">
                       <Label className="text-slate-200">Select Guest</Label>
-                      <Select
-                        value={selectedGuest?.id || ''}
-                        onValueChange={(id) => {
-                          const guest = guests.find(g => g.id === id);
-                          setSelectedGuest(guest || null);
-                        }}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full justify-between bg-slate-700 border-slate-600 text-slate-100 hover:bg-slate-600"
+                        onClick={() => setShowGuestSelector(true)}
                       >
-                        <SelectTrigger className="bg-slate-700 border-slate-600 text-slate-100">
-                          <SelectValue placeholder="Choose a guest..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {waitlistGuests.map((guest) => (
-                            <SelectItem key={guest.id} value={guest.id}>
-                              {guest.name} - {guest.partySize} guests (Waiting {guest.waitTime}m)
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        <span>
+                          {messagingGuest 
+                            ? `${messagingGuest.name} - ${messagingGuest.partySize} guests` 
+                            : 'Choose a guest...'}
+                        </span>
+                        <User className="w-4 h-4 ml-2 text-slate-400" />
+                      </Button>
                     </div>
 
-                    <div>
+                    <div className="space-y-2">
                       <Label className="text-slate-200">Message Template</Label>
                       <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
                         <SelectTrigger className="bg-slate-700 border-slate-600 text-slate-100">
@@ -1192,7 +1323,7 @@ export default function HostStationComplete() {
                       </Select>
                     </div>
 
-                    <div>
+                    <div className="space-y-2">
                       <Label className="text-slate-200">Custom Message</Label>
                       <Textarea
                         placeholder="Or type a custom message..."
@@ -1204,10 +1335,10 @@ export default function HostStationComplete() {
 
                     <Button
                       className="w-full bg-blue-600 hover:bg-blue-700"
-                      disabled={!selectedGuest}
+                      disabled={!messagingGuest}
                       onClick={() => {
-                        if (selectedGuest) {
-                          handleOpenMessagePreview(selectedGuest.id, messageText || undefined);
+                        if (messagingGuest) {
+                          handleOpenMessagePreview(messagingGuest.id, messageText || undefined);
                         }
                       }}
                     >
@@ -1235,7 +1366,17 @@ export default function HostStationComplete() {
                         messages.map((msg) => (
                           <div
                             key={msg.id}
-                            className="p-4 bg-slate-700/50 rounded-lg border border-slate-600"
+                            className="p-4 bg-slate-700/50 rounded-lg border border-slate-600 cursor-pointer hover:bg-slate-700 hover:border-blue-500 transition-all"
+                            onClick={() => {
+                              // Find the guest from the message
+                              const guest = guests.find(g => g.id === msg.guestId);
+                              if (guest) {
+                                setMessagingGuest(guest);
+                                setMessageText(msg.message);
+                                // Scroll to the message form
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                              }
+                            }}
                           >
                             <div className="flex items-start justify-between mb-2">
                               <div>
@@ -1315,7 +1456,7 @@ export default function HostStationComplete() {
                 <h3 className="text-xl text-slate-100 mb-6">Restaurant Information</h3>
                 
                 <div className="space-y-4 max-w-2xl">
-                  <div>
+                  <div className="space-y-2">
                     <Label className="text-slate-200">Restaurant Name</Label>
                     <Input
                       value={restaurantInfo.name}
@@ -1325,7 +1466,7 @@ export default function HostStationComplete() {
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
+                    <div className="space-y-2">
                       <Label className="text-slate-200">Phone Number</Label>
                       <div className="relative">
                         <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -1337,7 +1478,7 @@ export default function HostStationComplete() {
                       </div>
                     </div>
 
-                    <div>
+                    <div className="space-y-2">
                       <Label className="text-slate-200">Email</Label>
                       <div className="relative">
                         <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -1350,7 +1491,7 @@ export default function HostStationComplete() {
                     </div>
                   </div>
 
-                  <div>
+                  <div className="space-y-2">
                     <Label className="text-slate-200">Address</Label>
                     <div className="relative">
                       <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -1362,7 +1503,7 @@ export default function HostStationComplete() {
                     </div>
                   </div>
 
-                  <div>
+                  <div className="space-y-2">
                     <Label className="text-slate-200">Hours of Operation</Label>
                     <Input
                       value={restaurantInfo.hours}
@@ -1666,6 +1807,64 @@ export default function HostStationComplete() {
                 </div>
               </div>
             )}
+          </DialogContent>
+        </Dialog>
+
+        {/* Guest Selector Dialog - Simple List */}
+        <Dialog open={showGuestSelector} onOpenChange={setShowGuestSelector}>
+          <DialogContent className="bg-slate-800 border-slate-700 text-slate-100 max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-slate-100">Select Guest for Messaging</DialogTitle>
+              <DialogDescription className="text-slate-400">
+                Choose a guest from reservations or waitlist to send a message.
+              </DialogDescription>
+            </DialogHeader>
+            
+            <ScrollArea className="h-[400px] pr-4">
+              <div className="space-y-2">
+                {guests.length === 0 ? (
+                  <div className="text-center py-8 text-slate-400">
+                    <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                    <p>No guests available</p>
+                  </div>
+                ) : (
+                  guests.map((guest) => (
+                    <div
+                      key={guest.id}
+                      onClick={() => {
+                        setMessagingGuest(guest);
+                        setShowGuestSelector(false);
+                      }}
+                      className="p-4 rounded-lg border bg-slate-700/50 border-slate-600 hover:border-blue-500 hover:bg-slate-700 cursor-pointer transition-all"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <h4 className="text-slate-100">{guest.name}</h4>
+                          <Badge className={
+                            guest.status === 'reserved' ? 'bg-blue-500/20 text-blue-400' :
+                            guest.status === 'waiting' ? 'bg-yellow-500/20 text-yellow-400' :
+                            guest.status === 'seated' ? 'bg-green-500/20 text-green-400' :
+                            'bg-slate-500/20 text-slate-400'
+                          }>
+                            {guest.status === 'reserved' ? 'Reservation' : 
+                             guest.status === 'waiting' ? 'Waitlist' :
+                             guest.status === 'seated' ? 'Seated' : 'Completed'}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-3 text-sm text-slate-400">
+                          <span className="flex items-center gap-1">
+                            <Users className="w-3 h-3" />
+                            {guest.partySize} guests
+                          </span>
+                          <span>•</span>
+                          <span>{guest.phone}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </ScrollArea>
           </DialogContent>
         </Dialog>
 
