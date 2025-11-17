@@ -7,6 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Progress } from './ui/progress';
 import { Check } from 'lucide-react';
+import { ImageUpload } from './image-upload';
+import { uploadRestaurantProfileImage } from '../lib/firebase-storage';
+import { toast } from 'sonner';
 
 const RESTAURANT_TYPES = [
   'Fine Dining',
@@ -25,9 +28,10 @@ const RESTAURANT_TYPES = [
 ];
 
 export function RestaurantOnboarding() {
-  const { updateRestaurantProfile } = useAuth();
+  const { updateRestaurantProfile, user } = useAuth();
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [formData, setFormData] = useState({
     restaurantName: '',
     cuisineType: '',
@@ -67,6 +71,18 @@ export function RestaurantOnboarding() {
     setIsSubmitting(true);
     
     try {
+      // Upload image if one was selected
+      let uploadedImageUrl = formData.profileImageUrl;
+      if (selectedImageFile && user) {
+        try {
+          uploadedImageUrl = await uploadRestaurantProfileImage(user.uid, selectedImageFile);
+          toast.success('Profile image uploaded successfully!');
+        } catch (error) {
+          console.error('Error uploading image:', error);
+          toast.error('Failed to upload image, but continuing with setup');
+        }
+      }
+      
       // Build opening hours object
       const openingHours = {
         monday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
@@ -90,11 +106,14 @@ export function RestaurantOnboarding() {
         description: formData.description || undefined,
         website: formData.website || undefined,
         openingHours,
-        photos: formData.profileImageUrl ? [formData.profileImageUrl] : undefined,
+        photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
         hasCompletedOnboarding: true,
       });
+      
+      toast.success('Restaurant profile completed successfully!');
     } catch (error) {
       console.error('Error completing onboarding:', error);
+      toast.error('Failed to complete setup. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -374,19 +393,23 @@ export function RestaurantOnboarding() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="profileImageUrl" className="text-white">
-                    Profile Image URL (Optional)
+                  <Label className="text-white">
+                    Profile Image (Optional)
                   </Label>
-                  <Input
-                    id="profileImageUrl"
-                    type="url"
-                    placeholder="https://example.com/image.jpg"
-                    value={formData.profileImageUrl}
-                    onChange={(e) => handleInputChange('profileImageUrl', e.target.value)}
-                    className="bg-zinc-900 border-zinc-800 text-white"
+                  <ImageUpload
+                    currentImage={formData.profileImageUrl}
+                    onImageSelect={(file, previewUrl) => {
+                      setSelectedImageFile(file);
+                      handleInputChange('profileImageUrl', previewUrl);
+                    }}
+                    onImageRemove={() => {
+                      setSelectedImageFile(null);
+                      handleInputChange('profileImageUrl', '');
+                    }}
+                    disabled={isSubmitting}
                   />
                   <p className="text-xs text-zinc-500">
-                    Enter a URL for your restaurant's profile image
+                    Upload a profile image for your restaurant
                   </p>
                 </div>
               </div>

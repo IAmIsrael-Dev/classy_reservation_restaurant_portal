@@ -7,9 +7,11 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, connectAuthEmulator } from 'firebase/auth';
 import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import type { FirebaseApp } from 'firebase/app';
 import type { Auth } from 'firebase/auth';
 import type { Firestore } from 'firebase/firestore';
+import type { FirebaseStorage } from 'firebase/storage';
 
 // ============================================================================
 // Firebase Configuration
@@ -32,6 +34,7 @@ const firebaseConfig = {
 let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
+let storage: FirebaseStorage;
 
 try {
   // Initialize Firebase App
@@ -40,6 +43,7 @@ try {
   // Initialize Firebase Services
   auth = getAuth(app);
   db = getFirestore(app);
+  storage = getStorage(app);
   
   // Enable emulators in development (optional)
   // Check if running in browser environment
@@ -63,7 +67,7 @@ try {
 // Export Firebase Services
 // ============================================================================
 
-export { app, auth, db };
+export { app, auth, db, storage };
 
 // ============================================================================
 // Helper Functions
@@ -74,7 +78,7 @@ export { app, auth, db };
  */
 export const isFirebaseInitialized = (): boolean => {
   try {
-    return !!(app && auth && db);
+    return !!(app && auth && db && storage);
   } catch {
     return false;
   }

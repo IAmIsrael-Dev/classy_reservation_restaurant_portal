@@ -34,6 +34,8 @@ import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
 import { useMenuItems, useMenuCategories, useReservations, useTakeoutOrders, useFloors } from '../lib/firebase-hooks';
 import { useAuth } from './auth-provider';
+import { ImageUpload } from './image-upload';
+import { uploadRestaurantProfileImage } from '../lib/firebase-storage';
 import {
   BarChart3,
   TrendingUp,
@@ -1421,7 +1423,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   };
 
   // Firebase integration
-  const { restaurantProfile, updateRestaurantProfile } = useAuth();
+  const { restaurantProfile, updateRestaurantProfile, user } = useAuth();
   const firebaseMenuItems = useMenuItems();
   const firebaseCategories = useMenuCategories();
   const firebaseReservations = useReservations();
@@ -1548,6 +1550,8 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     },
     profileImage: "",
   });
+
+  const [selectedProfileImageFile, setSelectedProfileImageFile] = useState<File | null>(null);
 
   // Load restaurant info from Firebase profile (only in realtime mode)
   useEffect(() => {
@@ -1715,6 +1719,20 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     }
 
     try {
+      // Upload new profile image if one was selected
+      let uploadedImageUrl = restaurantInfo.profileImage;
+      if (selectedProfileImageFile && user) {
+        try {
+          uploadedImageUrl = await uploadRestaurantProfileImage(user.uid, selectedProfileImageFile);
+          toast.success('Profile image uploaded successfully!');
+          // Clear the selected file after upload
+          setSelectedProfileImageFile(null);
+        } catch (error) {
+          console.error('Error uploading image:', error);
+          toast.error('Failed to upload image, but saving other information');
+        }
+      }
+      
       // Parse address back into components
       const addressParts = restaurantInfo.address.split(',').map(s => s.trim());
       const stateZip = addressParts[addressParts.length - 1]?.split(' ') || [];
@@ -1729,7 +1747,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
         zipCode: stateZip[1] || '',
         phone: restaurantInfo.phone,
         email: restaurantInfo.email,
-        photos: restaurantInfo.profileImage ? [restaurantInfo.profileImage] : undefined,
+        photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
       });
       
       toast.success("Restaurant information updated successfully");
@@ -4105,27 +4123,28 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                         </div>
 
                         <div className="space-y-2">
-                          <Label
-                            htmlFor="profileImage"
-                            className="text-slate-200"
-                          >
-                            Profile Image URL
+                          <Label className="text-slate-200">
+                            Profile Image
                           </Label>
-                          <Input
-                            id="profileImage"
-                            type="url"
-                            placeholder="https://example.com/restaurant.jpg"
-                            value={restaurantInfo.profileImage}
-                            onChange={(e) =>
+                          <ImageUpload
+                            currentImage={restaurantInfo.profileImage}
+                            onImageSelect={(file, previewUrl) => {
+                              setSelectedProfileImageFile(file);
                               setRestaurantInfo({
                                 ...restaurantInfo,
-                                profileImage: e.target.value,
-                              })
-                            }
-                            className="bg-slate-700 border-slate-600 text-slate-100"
+                                profileImage: previewUrl,
+                              });
+                            }}
+                            onImageRemove={() => {
+                              setSelectedProfileImageFile(null);
+                              setRestaurantInfo({
+                                ...restaurantInfo,
+                                profileImage: '',
+                              });
+                            }}
                           />
                           <p className="text-xs text-slate-400">
-                            Enter a URL for your restaurant's profile image
+                            Upload a profile image for your restaurant
                           </p>
                         </div>
                       </div>
