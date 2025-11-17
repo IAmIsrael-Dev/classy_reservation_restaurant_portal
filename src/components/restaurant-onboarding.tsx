@@ -37,8 +37,11 @@ export function RestaurantOnboarding() {
     state: '',
     zipCode: '',
     capacity: '',
-    openingTime: '17:00',
+    description: '',
+    website: '',
+    openingTime: '11:00',
     closingTime: '22:00',
+    profileImageUrl: '',
   });
 
   const totalSteps = 3;
@@ -64,11 +67,30 @@ export function RestaurantOnboarding() {
     setIsSubmitting(true);
     
     try {
+      // Build opening hours object
+      const openingHours = {
+        monday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
+        tuesday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
+        wednesday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
+        thursday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
+        friday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
+        saturday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
+        sunday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
+      };
+
       await updateRestaurantProfile({
         restaurantName: formData.restaurantName,
         cuisineType: formData.cuisineType,
-        address: `${formData.address}, ${formData.city}, ${formData.state} ${formData.zipCode}`,
+        address: formData.address,
+        city: formData.city,
+        state: formData.state,
+        zipCode: formData.zipCode,
         phone: formData.phone,
+        capacity: formData.capacity ? parseInt(formData.capacity) : undefined,
+        description: formData.description || undefined,
+        website: formData.website || undefined,
+        openingHours,
+        photos: formData.profileImageUrl ? [formData.profileImageUrl] : undefined,
         hasCompletedOnboarding: true,
       });
     } catch (error) {
@@ -322,6 +344,50 @@ export function RestaurantOnboarding() {
                       className="bg-zinc-900 border-zinc-800 text-white"
                     />
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="description" className="text-white">
+                    Description (Optional)
+                  </Label>
+                  <Input
+                    id="description"
+                    placeholder="Brief description of your restaurant"
+                    value={formData.description}
+                    onChange={(e) => handleInputChange('description', e.target.value)}
+                    className="bg-zinc-900 border-zinc-800 text-white"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="website" className="text-white">
+                    Website (Optional)
+                  </Label>
+                  <Input
+                    id="website"
+                    type="url"
+                    placeholder="https://yourrestaurant.com"
+                    value={formData.website}
+                    onChange={(e) => handleInputChange('website', e.target.value)}
+                    className="bg-zinc-900 border-zinc-800 text-white"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="profileImageUrl" className="text-white">
+                    Profile Image URL (Optional)
+                  </Label>
+                  <Input
+                    id="profileImageUrl"
+                    type="url"
+                    placeholder="https://example.com/image.jpg"
+                    value={formData.profileImageUrl}
+                    onChange={(e) => handleInputChange('profileImageUrl', e.target.value)}
+                    className="bg-zinc-900 border-zinc-800 text-white"
+                  />
+                  <p className="text-xs text-zinc-500">
+                    Enter a URL for your restaurant's profile image
+                  </p>
                 </div>
               </div>
 

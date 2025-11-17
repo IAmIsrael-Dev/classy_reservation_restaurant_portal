@@ -33,6 +33,7 @@ import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
 import { useMenuItems, useMenuCategories, useReservations, useTakeoutOrders, useFloors } from '../lib/firebase-hooks';
+import { useAuth } from './auth-provider';
 import {
   BarChart3,
   TrendingUp,
@@ -1420,6 +1421,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   };
 
   // Firebase integration
+  const { restaurantProfile, updateRestaurantProfile } = useAuth();
   const firebaseMenuItems = useMenuItems();
   const firebaseCategories = useMenuCategories();
   const firebaseReservations = useReservations();
@@ -1489,8 +1491,20 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     if (!isDemo && !firebaseFloors.loading && firebaseFloors.floors.length > 0) {
       const convertedFloors = firebaseFloors.floors.map(convertFirebaseFloorToComponent);
       setFloors(convertedFloors);
-      // Always set selected floor to first floor (index 0) when floors are loaded
-      setSelectedFloor(convertedFloors[0]);
+      
+      // Preserve the currently selected floor if it still exists, otherwise select first floor
+      if (selectedFloor) {
+        const updatedSelectedFloor = convertedFloors.find(f => f.id === selectedFloor.id);
+        if (updatedSelectedFloor) {
+          setSelectedFloor(updatedSelectedFloor);
+        } else {
+          // Selected floor was deleted, fall back to first floor
+          setSelectedFloor(convertedFloors[0]);
+        }
+      } else {
+        // No floor selected yet, select first floor
+        setSelectedFloor(convertedFloors[0]);
+      }
     } else if (!isDemo && !firebaseFloors.loading) {
       // No floors in Firebase - set empty array
       setFloors([]);
@@ -1523,7 +1537,72 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       "Valet Parking",
     ],
     dietary: ["Vegetarian", "Vegan", "Gluten-Free"],
+    hours: {
+      monday: { open: "11:00", close: "22:00", closed: false },
+      tuesday: { open: "11:00", close: "22:00", closed: false },
+      wednesday: { open: "11:00", close: "22:00", closed: false },
+      thursday: { open: "11:00", close: "22:00", closed: false },
+      friday: { open: "11:00", close: "23:00", closed: false },
+      saturday: { open: "10:00", close: "23:00", closed: false },
+      sunday: { open: "10:00", close: "21:00", closed: false },
+    },
+    profileImage: "",
   });
+
+  // Load restaurant info from Firebase profile (only in realtime mode)
+  useEffect(() => {
+    if (!isDemo && restaurantProfile) {
+      setRestaurantInfo(prev => ({
+        ...prev,
+        name: restaurantProfile.restaurantName || prev.name,
+        cuisine: restaurantProfile.cuisineType || prev.cuisine,
+        description: restaurantProfile.description || prev.description,
+        address: `${restaurantProfile.address}, ${restaurantProfile.city}, ${restaurantProfile.state} ${restaurantProfile.zipCode}`,
+        phone: restaurantProfile.phone || prev.phone,
+        email: restaurantProfile.email || prev.email,
+        // Convert Firebase RestaurantHours to local hours format
+        hours: restaurantProfile.openingHours ? {
+          monday: { open: restaurantProfile.openingHours.monday?.open || '11:00', close: restaurantProfile.openingHours.monday?.close || '22:00', closed: restaurantProfile.openingHours.monday?.isClosed || false },
+          tuesday: { open: restaurantProfile.openingHours.tuesday?.open || '11:00', close: restaurantProfile.openingHours.tuesday?.close || '22:00', closed: restaurantProfile.openingHours.tuesday?.isClosed || false },
+          wednesday: { open: restaurantProfile.openingHours.wednesday?.open || '11:00', close: restaurantProfile.openingHours.wednesday?.close || '22:00', closed: restaurantProfile.openingHours.wednesday?.isClosed || false },
+          thursday: { open: restaurantProfile.openingHours.thursday?.open || '11:00', close: restaurantProfile.openingHours.thursday?.close || '22:00', closed: restaurantProfile.openingHours.thursday?.isClosed || false },
+          friday: { open: restaurantProfile.openingHours.friday?.open || '11:00', close: restaurantProfile.openingHours.friday?.close || '23:00', closed: restaurantProfile.openingHours.friday?.isClosed || false },
+          saturday: { open: restaurantProfile.openingHours.saturday?.open || '10:00', close: restaurantProfile.openingHours.saturday?.close || '23:00', closed: restaurantProfile.openingHours.saturday?.isClosed || false },
+          sunday: { open: restaurantProfile.openingHours.sunday?.open || '10:00', close: restaurantProfile.openingHours.sunday?.close || '21:00', closed: restaurantProfile.openingHours.sunday?.isClosed || false },
+        } : prev.hours,
+        profileImage: restaurantProfile.photos?.[0] || prev.profileImage,
+      }));
+
+      // Also load hours into the hours state for the Hours tab
+      if (restaurantProfile.openingHours) {
+        const convertedHours: HoursOfOperation[] = (
+          ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as DayOfWeek[]
+        ).map(day => {
+          const dayHours = restaurantProfile.openingHours?.[day];
+          return {
+            day,
+            isOpen: dayHours ? !dayHours.isClosed : false,
+            openTime: dayHours?.open || '11:00',
+            closeTime: dayHours?.close || '22:00',
+          };
+        });
+        setHours(convertedHours);
+      }
+    }
+  }, [restaurantProfile, isDemo]);
+
+  // Clear selected table if it doesn't belong to the current floor
+  useEffect(() => {
+    if (selectedTable && selectedFloor) {
+      const tableExistsInCurrentFloor = selectedFloor.layout.some(
+        (t) => t.id === selectedTable.id
+      );
+      if (!tableExistsInCurrentFloor) {
+        setSelectedTable(null);
+        setIsTableDetailOpen(false);
+      }
+    }
+  }, [selectedFloor, selectedTable]);
 
   const [availabilitySettings, setAvailabilitySettings] =
     useState({
@@ -1629,18 +1708,65 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
           .slice(0, 5);
       })();
 
-  const handleSaveRestaurantInfo = () => {
-    toast.success(
-      "Restaurant information updated successfully",
-    );
+  const handleSaveRestaurantInfo = async () => {
+    if (isDemo) {
+      toast.success("Restaurant information updated successfully (demo mode)");
+      return;
+    }
+
+    try {
+      // Parse address back into components
+      const addressParts = restaurantInfo.address.split(',').map(s => s.trim());
+      const stateZip = addressParts[addressParts.length - 1]?.split(' ') || [];
+      
+      await updateRestaurantProfile({
+        restaurantName: restaurantInfo.name,
+        cuisineType: restaurantInfo.cuisine,
+        description: restaurantInfo.description,
+        address: addressParts[0] || restaurantInfo.address,
+        city: addressParts[1] || '',
+        state: stateZip[0] || '',
+        zipCode: stateZip[1] || '',
+        phone: restaurantInfo.phone,
+        email: restaurantInfo.email,
+        photos: restaurantInfo.profileImage ? [restaurantInfo.profileImage] : undefined,
+      });
+      
+      toast.success("Restaurant information updated successfully");
+    } catch (error) {
+      console.error('Error saving restaurant info:', error);
+      toast.error("Failed to save restaurant information");
+    }
   };
 
   const handleSaveAvailability = () => {
     toast.success("Availability settings saved");
   };
 
-  const handleSaveHours = () => {
-    toast.success("Hours of operation saved");
+  const handleSaveHours = async () => {
+    if (isDemo) {
+      toast.success("Hours of operation saved (demo mode)");
+      return;
+    }
+
+    try {
+      // Convert hours array to RestaurantHours object
+      const openingHours: Record<string, { open: string; close: string; isClosed: boolean }> = {};
+      hours.forEach(dayHours => {
+        openingHours[dayHours.day] = {
+          open: dayHours.openTime,
+          close: dayHours.closeTime,
+          isClosed: !dayHours.isOpen,
+        };
+      });
+      
+      await updateRestaurantProfile({ openingHours });
+      
+      toast.success("Hours of operation saved");
+    } catch (error) {
+      console.error('Error saving hours:', error);
+      toast.error("Failed to save hours");
+    }
   };
 
   // Table editing functions
@@ -1663,13 +1789,15 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     };
 
     try {
+      const updatedLayout = [...selectedFloor.layout, newTable];
+      
       if (isDemo) {
         // Demo mode - update local state only
         const updatedFloors = floors.map((f) =>
           f.id === selectedFloor.id
             ? {
                 ...f,
-                layout: [...f.layout, newTable],
+                layout: updatedLayout,
                 tableCount: f.tableCount + 1,
               }
             : f,
@@ -1679,14 +1807,29 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
           updatedFloors.find((f) => f.id === selectedFloor.id) || null,
         );
       } else {
-        // Realtime mode - update floor in Firebase
-        const updatedLayout = [...selectedFloor.layout, newTable];
+        // Realtime mode - update floor in Firebase AND local state
         const firebaseLayout = updatedLayout.map(convertComponentTableToFirebase);
         await firebaseFloors.updateFloor(selectedFloor.id, {
           layout: firebaseLayout as import('../lib/firebase-service').Table[],
           tableCount: selectedFloor.tableCount + 1,
           lastModified: new Date().toISOString(),
         });
+        
+        // Also update local state immediately
+        const updatedFloors = floors.map((f) =>
+          f.id === selectedFloor.id
+            ? {
+                ...f,
+                layout: updatedLayout,
+                tableCount: f.tableCount + 1,
+                lastModified: new Date().toISOString(),
+              }
+            : f,
+        );
+        setFloors(updatedFloors);
+        setSelectedFloor(
+          updatedFloors.find((f) => f.id === selectedFloor.id) || null,
+        );
       }
       setSelectedTable(newTable);
       toast.success(`New ${shape} table added`);
@@ -1700,13 +1843,17 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     if (!selectedTable || !selectedFloor) return;
 
     try {
+      const updatedLayout = selectedFloor.layout.filter(
+        (t) => t.id !== selectedTable.id,
+      );
+      
       if (isDemo) {
         // Demo mode - update local state only
         const updatedFloors = floors.map((f) =>
           f.id === selectedFloor.id
             ? {
                 ...f,
-                layout: f.layout.filter((t) => t.id !== selectedTable.id),
+                layout: updatedLayout,
                 tableCount: f.tableCount - 1,
               }
             : f,
@@ -1716,16 +1863,29 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
           updatedFloors.find((f) => f.id === selectedFloor.id) || null,
         );
       } else {
-        // Realtime mode - update floor in Firebase
-        const updatedLayout = selectedFloor.layout.filter(
-          (t) => t.id !== selectedTable.id,
-        );
+        // Realtime mode - update floor in Firebase AND local state
         const firebaseLayout = updatedLayout.map(convertComponentTableToFirebase);
         await firebaseFloors.updateFloor(selectedFloor.id, {
           layout: firebaseLayout as import('../lib/firebase-service').Table[],
           tableCount: selectedFloor.tableCount - 1,
           lastModified: new Date().toISOString(),
         });
+        
+        // Also update local state immediately
+        const updatedFloors = floors.map((f) =>
+          f.id === selectedFloor.id
+            ? {
+                ...f,
+                layout: updatedLayout,
+                tableCount: f.tableCount - 1,
+                lastModified: new Date().toISOString(),
+              }
+            : f,
+        );
+        setFloors(updatedFloors);
+        setSelectedFloor(
+          updatedFloors.find((f) => f.id === selectedFloor.id) || null,
+        );
       }
       setSelectedTable(null);
       toast.success("Table deleted");
@@ -1875,12 +2035,22 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
         setSelectedFloor(updatedFloor);
       }
     } else {
-      // Realtime mode - update in Firebase
+      // Realtime mode - update in Firebase AND local state (optimistic update)
       const firebaseLayout = updatedLayout.map(convertComponentTableToFirebase);
       await firebaseFloors.updateFloor(floorId, {
         layout: firebaseLayout as import('../lib/firebase-service').Table[],
         lastModified: new Date().toISOString(),
       });
+      
+      // Also update local state immediately for responsive UI
+      const updatedFloors = floors.map((f) =>
+        f.id === floorId ? { ...f, layout: updatedLayout, lastModified: new Date().toISOString() } : f
+      );
+      setFloors(updatedFloors);
+      const updatedFloor = updatedFloors.find((f) => f.id === floorId);
+      if (updatedFloor) {
+        setSelectedFloor(updatedFloor);
+      }
     }
   };
 
@@ -2523,13 +2693,16 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 w-full lg:w-auto">
                             <Select
                               value={selectedFloor?.id}
-                              onValueChange={(val) =>
+                              onValueChange={(val) => {
                                 setSelectedFloor(
                                   floors.find(
                                     (f) => f.id === val,
                                   ) || null,
-                                )
-                              }
+                                );
+                                // Clear selected table when changing floors to prevent showing wrong floor's tables
+                                setSelectedTable(null);
+                                setIsTableDetailOpen(false);
+                              }}
                             >
                               <SelectTrigger className="w-full sm:w-[160px] bg-slate-700 border-slate-600 text-slate-100">
                                 <SelectValue placeholder="Select Floor" />
@@ -2651,9 +2824,12 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                             </Badge>
                             <Button
                               size="sm"
-                              onClick={() =>
-                                setIsEditMode(true)
-                              }
+                              onClick={() => {
+                                setIsEditMode(true);
+                                // Clear selected table when entering edit mode
+                                setSelectedTable(null);
+                                setIsTableDetailOpen(false);
+                              }}
                               className="bg-blue-600 hover:bg-blue-700 flex-1 lg:flex-none"
                             >
                               <Edit2 className="w-4 h-4 mr-2" />
@@ -3927,6 +4103,31 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                             />
                           </div>
                         </div>
+
+                        <div className="space-y-2">
+                          <Label
+                            htmlFor="profileImage"
+                            className="text-slate-200"
+                          >
+                            Profile Image URL
+                          </Label>
+                          <Input
+                            id="profileImage"
+                            type="url"
+                            placeholder="https://example.com/restaurant.jpg"
+                            value={restaurantInfo.profileImage}
+                            onChange={(e) =>
+                              setRestaurantInfo({
+                                ...restaurantInfo,
+                                profileImage: e.target.value,
+                              })
+                            }
+                            className="bg-slate-700 border-slate-600 text-slate-100"
+                          />
+                          <p className="text-xs text-slate-400">
+                            Enter a URL for your restaurant's profile image
+                          </p>
+                        </div>
                       </div>
 
                       {/* Listing Preview */}
@@ -3937,9 +4138,22 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                         </h4>
 
                         <Card className="p-4 bg-slate-900 border-slate-700">
-                          <div className="aspect-video bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg mb-4 flex items-center justify-center">
-                            <Image className="w-12 h-12 text-white/50" />
-                          </div>
+                          {restaurantInfo.profileImage ? (
+                            <div className="aspect-video bg-slate-800 rounded-lg mb-4 overflow-hidden">
+                              <img
+                                src={restaurantInfo.profileImage}
+                                alt={restaurantInfo.name}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="aspect-video bg-gradient-to-br from-blue-500 to-cyan-500 rounded-lg mb-4 flex items-center justify-center">
+                              <Image className="w-12 h-12 text-white/50" />
+                            </div>
+                          )}
 
                           <div className="space-y-3">
                             <div className="flex items-center justify-between">
