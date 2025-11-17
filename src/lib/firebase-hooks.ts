@@ -8,6 +8,7 @@ import { useAuth } from '../components/auth-provider';
 import {
   guestService,
   tableService,
+  floorService,
   messageService,
   menuItemService,
   menuCategoryService,
@@ -15,6 +16,7 @@ import {
   takeoutOrderService,
   type Guest,
   type Table,
+  type Floor,
   type Message,
   type MenuItem,
   type MenuCategory,
@@ -178,6 +180,78 @@ export function useTables() {
     updateTable,
     deleteTable,
     refresh: loadTables,
+  };
+}
+
+// ============================================================================
+// Floor Hooks
+// ============================================================================
+
+export function useFloors() {
+  const [floors, setFloors] = useState<Floor[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useRestaurantId();
+  
+  // Load floors on mount
+  useEffect(() => {
+    loadFloors();
+  }, []);
+  
+  const loadFloors = async () => {
+    try {
+      setLoading(true);
+      const data = await floorService.getAll();
+      setFloors(data);
+      setError(null);
+    } catch (err) {
+      setError('Failed to load floors');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  // Subscribe to real-time updates
+  useEffect(() => {
+    const unsubscribe = floorService.subscribe((data) => {
+      setFloors(data);
+      setLoading(false);
+    });
+    
+    return () => unsubscribe();
+  }, []);
+  
+  const createFloor = useCallback(async (floorData: Omit<Floor, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
+    const floor = await floorService.create(floorData);
+    if (floor) {
+      return floor;
+    }
+    throw new Error('Failed to create floor');
+  }, []);
+  
+  const updateFloor = useCallback(async (id: string, updates: Partial<Floor>) => {
+    const success = await floorService.update(id, updates);
+    if (!success) {
+      throw new Error('Failed to update floor');
+    }
+  }, []);
+  
+  const deleteFloor = useCallback(async (id: string) => {
+    const success = await floorService.delete(id);
+    if (!success) {
+      throw new Error('Failed to delete floor');
+    }
+  }, []);
+  
+  return {
+    floors,
+    loading,
+    error,
+    createFloor,
+    updateFloor,
+    deleteFloor,
+    refresh: loadFloors,
   };
 }
 

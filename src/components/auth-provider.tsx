@@ -57,7 +57,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithEmail = async (email: string, password: string) => {
     try {
-      await emailSignIn(email, password);
+      const user = await emailSignIn(email, password);
+      
+      // Initialize profile if it doesn't exist (similar to Google sign-in)
+      const profile = await getRestaurantProfile(user.uid);
+      if (!profile) {
+        const initialProfile = await initializeUserProfile(user);
+        setRestaurantProfile(initialProfile);
+      }
     } catch (error) {
       console.error('Error signing in with email:', error);
       throw error;

@@ -16,7 +16,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Separator } from './ui/separator';
 import { toast } from 'sonner';
-import { useGuests, useTables, useMessages } from '../lib/firebase-hooks';
+import { useGuests, useTables, useMessages, useFloors } from '../lib/firebase-hooks';
 import {
   LayoutDashboard,
   List,
@@ -568,6 +568,7 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
   const firebaseGuests = useGuests();
   const firebaseTables = useTables();
   const firebaseMessages = useMessages();
+  const firebaseFloors = useFloors();
 
   // Helper function to convert Firebase Guest to component Guest type
   const convertFirebaseGuest = (fbGuest: typeof firebaseGuests.guests[0]): Guest => {
@@ -599,7 +600,21 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
   };
 
   // Helper function to convert Firebase Table to component Table type
-  const convertFirebaseTable = (fbTable: typeof firebaseTables.tables[0]): Table => {
+  const convertFirebaseTable = (fbTable: import('../lib/firebase-service').Table, floorName: string): Table => {
+    // Map floor name to expected floor type
+    const floorMap: Record<string, Table['floor']> = {
+      'Ground Floor': 'ground',
+      'Main Floor': 'main',
+      'Upper Floor': 'upper',
+      'Rooftop': 'rooftop',
+      'main': 'main',
+      'ground': 'ground',
+      'upper': 'upper',
+      'rooftop': 'rooftop',
+    };
+    
+    const mappedFloor = floorMap[floorName] || 'main';
+    
     return {
       id: parseInt(fbTable.id.replace(/\D/g, ''), 10) || Math.floor(Math.random() * 1000),
       number: fbTable.number,
@@ -608,8 +623,8 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
       section: fbTable.section,
       position: fbTable.position,
       currentGuest: fbTable.currentGuest,
-      shape: fbTable.shape,
-      floor: fbTable.floor,
+      shape: fbTable.shape as Table['shape'],
+      floor: mappedFloor,
     };
   };
 
@@ -633,16 +648,24 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
     if (isDemo) {
       // Demo mode - use mock data
       setTables(generateMockTables());
-    } else if (!firebaseTables.loading) {
-      // Realtime mode - use Firebase data (empty array if no data)
-      if (firebaseTables.tables.length > 0) {
-        const convertedTables = firebaseTables.tables.map(convertFirebaseTable);
-        setTables(convertedTables);
+    } else if (!firebaseFloors.loading) {
+      // Realtime mode - extract tables from floors
+      if (firebaseFloors.floors.length > 0) {
+        // Flatten all tables from all floors
+        const allTables: Table[] = [];
+        firebaseFloors.floors.forEach(floor => {
+          if (floor.layout && floor.layout.length > 0) {
+            floor.layout.forEach(fbTable => {
+              allTables.push(convertFirebaseTable(fbTable, floor.name));
+            });
+          }
+        });
+        setTables(allTables);
       } else {
         setTables([]);
       }
     }
-  }, [firebaseTables.tables, firebaseTables.loading, isDemo]);
+  }, [firebaseFloors.floors, firebaseFloors.loading, isDemo]);
 
   useEffect(() => {
     if (isDemo) {

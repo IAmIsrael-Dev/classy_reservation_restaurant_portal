@@ -54,8 +54,23 @@ export interface Table {
   section: string;
   position: { x: number; y: number };
   currentGuest?: string;
-  shape: 'round' | 'square' | 'rectangle';
-  floor: 'ground' | 'main' | 'upper' | 'rooftop';
+  shape: 'round' | 'square' | 'rectangle' | 'oval' | 'booth' | 'bar' | 'banquet' | 'semicircle' | 'triangle' | 'octagon' | 'communal' | 'high-top' | 'booth-curved' | 'u-shape' | 'l-shape';
+  floorId: string;
+  rotation?: number;
+  scale?: number;
+  reservationId?: string;
+  serverId?: string;
+  restaurantId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Floor {
+  id: string;
+  name: string;
+  tableCount: number;
+  layout: Table[];
+  lastModified?: string;
   restaurantId: string;
   createdAt: string;
   updatedAt: string;
@@ -145,6 +160,7 @@ export interface OrderItem {
 const COLLECTIONS = {
   GUESTS: 'guests',
   TABLES: 'tables',
+  FLOORS: 'floors',
   MESSAGES: 'messages',
   MENU_ITEMS: 'menu-items',
   MENU_CATEGORIES: 'menu-categories',
@@ -192,8 +208,7 @@ export const guestService = {
       const restaurantId = getCurrentRestaurantId();
       const q = query(
         collection(db, COLLECTIONS.GUESTS),
-        where('restaurantId', '==', restaurantId),
-        orderBy('createdAt', 'desc')
+        where('restaurantId', '==', restaurantId)
       );
       
       const snapshot = await getDocs(q);
@@ -202,13 +217,16 @@ export const guestService = {
         return [];
       }
       
-      return snapshot.docs.map(doc => parseDocument<Guest>(doc, {
+      const guests = snapshot.docs.map(doc => parseDocument<Guest>(doc, {
         status: 'waiting',
         source: 'walk-in',
         partySize: 2,
         phone: '',
         name: 'Guest',
       }));
+      
+      // Sort on client side to avoid composite index requirement
+      return guests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     } catch (error) {
       console.error('Error fetching guests:', error);
       return [];
@@ -295,8 +313,7 @@ export const guestService = {
     const restaurantId = getCurrentRestaurantId();
     const q = query(
       collection(db, COLLECTIONS.GUESTS),
-      where('restaurantId', '==', restaurantId),
-      orderBy('createdAt', 'desc')
+      where('restaurantId', '==', restaurantId)
     );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -307,6 +324,8 @@ export const guestService = {
         phone: '',
         name: 'Guest',
       }));
+      // Sort on client side to avoid composite index requirement
+      guests.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       callback(guests);
     }, (error) => {
       console.error('Error in guest subscription:', error);
@@ -330,8 +349,7 @@ export const tableService = {
       const restaurantId = getCurrentRestaurantId();
       const q = query(
         collection(db, COLLECTIONS.TABLES),
-        where('restaurantId', '==', restaurantId),
-        orderBy('number', 'asc')
+        where('restaurantId', '==', restaurantId)
       );
       
       const snapshot = await getDocs(q);
@@ -340,14 +358,17 @@ export const tableService = {
         return [];
       }
       
-      return snapshot.docs.map(doc => parseDocument<Table>(doc, {
+      const tables = snapshot.docs.map(doc => parseDocument<Table>(doc, {
         status: 'available',
         capacity: 4,
         section: 'Main',
         shape: 'round',
-        floor: 'main',
+        floorId: 'main',
         position: { x: 0, y: 0 },
       }));
+      
+      // Sort on client side to avoid composite index requirement
+      return tables.sort((a, b) => a.number - b.number);
     } catch (error) {
       console.error('Error fetching tables:', error);
       return [];
@@ -415,8 +436,7 @@ export const tableService = {
     const restaurantId = getCurrentRestaurantId();
     const q = query(
       collection(db, COLLECTIONS.TABLES),
-      where('restaurantId', '==', restaurantId),
-      orderBy('number', 'asc')
+      where('restaurantId', '==', restaurantId)
     );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -425,12 +445,132 @@ export const tableService = {
         capacity: 4,
         section: 'Main',
         shape: 'round',
-        floor: 'main',
+        floorId: 'main',
         position: { x: 0, y: 0 },
       }));
+      // Sort on client side to avoid composite index requirement
+      tables.sort((a, b) => a.number - b.number);
       callback(tables);
     }, (error) => {
       console.error('Error in table subscription:', error);
+      callback([]);
+    });
+    
+    return unsubscribe;
+  }
+};
+
+// ============================================================================
+// Floor Operations
+// ============================================================================
+
+export const floorService = {
+  /**
+   * Get all floors for current restaurant
+   */
+  async getAll(): Promise<Floor[]> {
+    try {
+      const restaurantId = getCurrentRestaurantId();
+      const q = query(
+        collection(db, COLLECTIONS.FLOORS),
+        where('restaurantId', '==', restaurantId)
+      );
+      
+      const snapshot = await getDocs(q);
+      
+      if (snapshot.empty) {
+        return [];
+      }
+      
+      const floors = snapshot.docs.map(doc => parseDocument<Floor>(doc, {
+        tableCount: 0,
+        layout: [],
+        lastModified: new Date().toISOString(),
+      }));
+      
+      // Sort on client side to avoid composite index requirement
+      return floors.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    } catch (error) {
+      console.error('Error fetching floors:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Create new floor
+   */
+  async create(floorData: Omit<Floor, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>): Promise<Floor | null> {
+    try {
+      const restaurantId = getCurrentRestaurantId();
+      const now = Timestamp.now();
+      
+      const docRef = await addDoc(collection(db, COLLECTIONS.FLOORS), {
+        ...floorData,
+        restaurantId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      
+      const newDoc = await getDoc(docRef);
+      return parseDocument<Floor>(newDoc);
+    } catch (error) {
+      console.error('Error creating floor:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Update floor
+   */
+  async update(id: string, updates: Partial<Floor>): Promise<boolean> {
+    try {
+      const docRef = doc(db, COLLECTIONS.FLOORS, id);
+      await updateDoc(docRef, {
+        ...updates,
+        updatedAt: Timestamp.now(),
+      });
+      return true;
+    } catch (error) {
+      console.error('Error updating floor:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Delete floor
+   */
+  async delete(id: string): Promise<boolean> {
+    try {
+      const docRef = doc(db, COLLECTIONS.FLOORS, id);
+      await deleteDoc(docRef);
+      return true;
+    } catch (error) {
+      console.error('Error deleting floor:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Subscribe to real-time updates
+   */
+  subscribe(callback: (floors: Floor[]) => void): () => void {
+    const restaurantId = getCurrentRestaurantId();
+    const q = query(
+      collection(db, COLLECTIONS.FLOORS),
+      where('restaurantId', '==', restaurantId)
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const floors = snapshot.docs.map(doc => parseDocument<Floor>(doc, {
+        tableCount: 0,
+        layout: [],
+        lastModified: new Date().toISOString(),
+      }));
+      // Sort on client side to avoid composite index requirement
+      floors.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      callback(floors);
+    }, (error) => {
+      console.error('Error in floor subscription:', error);
       callback([]);
     });
     
@@ -451,8 +591,7 @@ export const messageService = {
       const restaurantId = getCurrentRestaurantId();
       const q = query(
         collection(db, COLLECTIONS.MESSAGES),
-        where('restaurantId', '==', restaurantId),
-        orderBy('timestamp', 'desc')
+        where('restaurantId', '==', restaurantId)
       );
       
       const snapshot = await getDocs(q);
@@ -461,12 +600,15 @@ export const messageService = {
         return [];
       }
       
-      return snapshot.docs.map(doc => parseDocument<Message>(doc, {
+      const messages = snapshot.docs.map(doc => parseDocument<Message>(doc, {
         sent: false,
         message: '',
         phone: '',
         guestName: 'Guest',
       }));
+      
+      // Sort on client side to avoid composite index requirement
+      return messages.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     } catch (error) {
       console.error('Error fetching messages:', error);
       return [];
@@ -501,8 +643,7 @@ export const messageService = {
     const restaurantId = getCurrentRestaurantId();
     const q = query(
       collection(db, COLLECTIONS.MESSAGES),
-      where('restaurantId', '==', restaurantId),
-      orderBy('timestamp', 'desc')
+      where('restaurantId', '==', restaurantId)
     );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -512,6 +653,8 @@ export const messageService = {
         phone: '',
         guestName: 'Guest',
       }));
+      // Sort on client side to avoid composite index requirement
+      messages.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       callback(messages);
     }, (error) => {
       console.error('Error in message subscription:', error);
@@ -1020,6 +1163,7 @@ export const takeoutOrderService = {
 export const firebaseService = {
   guests: guestService,
   tables: tableService,
+  floors: floorService,
   messages: messageService,
   menuItems: menuItemService,
   menuCategories: menuCategoryService,

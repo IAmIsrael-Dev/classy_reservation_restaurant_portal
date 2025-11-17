@@ -37,11 +37,12 @@ const demoAccounts: UserAccount[] = [
 ];
 
 function AppContent() {
-  const { user: firebaseUser, restaurantProfile, loading: firebaseLoading, signInWithGoogle, signUpWithEmail, logout: firebaseLogout } = useAuth();
+  const { user: firebaseUser, restaurantProfile, loading: firebaseLoading, signInWithGoogle, signInWithEmail, signUpWithEmail, logout: firebaseLogout } = useAuth();
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isSignInLoading, setIsSignInLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [authView, setAuthView] = useState<'initial' | 'signin' | 'signup'>('initial');
   
@@ -69,23 +70,6 @@ function AppContent() {
     return <RestaurantOnboarding />;
   }
 
-  const handleDemoLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-
-    const user = demoAccounts.find(
-      (acc) => acc.email === email && acc.password === password
-    );
-
-    if (user) {
-      setCurrentUser(user);
-      setEmail('');
-      setPassword('');
-    } else {
-      setError('Invalid email or password');
-    }
-  };
-
   const handleDemoLogout = () => {
     setCurrentUser(null);
   };
@@ -110,6 +94,28 @@ function AppContent() {
       }
     } finally {
       setIsGoogleLoading(false);
+    }
+  };
+
+  const handleEmailSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setIsSignInLoading(true);
+
+    try {
+      await signInWithEmail(email, password);
+      setEmail('');
+      setPassword('');
+      setAuthView('initial');
+    } catch (err) {
+      console.error('Email Sign-In Error:', err);
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to sign in');
+      }
+    } finally {
+      setIsSignInLoading(false);
     }
   };
 
@@ -155,11 +161,7 @@ function AppContent() {
 
   // If user is logged in (demo or Firebase), show their appropriate interface
   if (activeUser) {
-    const AppComponent = {
-      host: HostSection,
-      manager: ManagerApp,
-    }[activeUser.role!];
-
+    const isDemoUser = !!currentUser; // Demo user if currentUser is set (via quickLogin)
     const roleInfo = {
       host: { title: 'Host Dashboard', icon: Users, gradient: 'from-cyan-500 to-blue-500' },
       manager: { title: 'Manager Console', icon: BarChart3, gradient: 'from-blue-600 to-indigo-600' },
@@ -210,7 +212,11 @@ function AppContent() {
             </div>
           </div>
           
-          <AppComponent />
+          {activeUser.role === 'manager' ? (
+            <ManagerApp isDemo={isDemoUser} />
+          ) : (
+            <HostSection isDemo={isDemoUser} />
+          )}
         </div>
       </>
     );
@@ -379,7 +385,7 @@ function AppContent() {
                         </Button>
                       </div>
 
-                      <form onSubmit={handleDemoLogin} className="space-y-5">
+                      <form onSubmit={handleEmailSignIn} className="space-y-5">
                         <div className="space-y-2">
                           <Label htmlFor="email" className="text-slate-200">Email Address</Label>
                           <div className="relative">
@@ -418,18 +424,41 @@ function AppContent() {
                               initial={{ opacity: 0, y: -10 }}
                               animate={{ opacity: 1, y: 0 }}
                               exit={{ opacity: 0, y: -10 }}
-                              className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg"
+                              className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg space-y-2"
                             >
                               <p className="text-sm text-red-400">{error}</p>
+                              {error.includes('Invalid email or password') && (
+                                <p className="text-xs text-slate-400">
+                                  Don't have an account?{' '}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAuthView('signup');
+                                      setError('');
+                                    }}
+                                    className="text-blue-400 hover:text-blue-300 underline"
+                                  >
+                                    Create one here
+                                  </button>
+                                </p>
+                              )}
                             </motion.div>
                           )}
                         </AnimatePresence>
 
                         <Button
                           type="submit"
+                          disabled={isSignInLoading}
                           className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white shadow-lg"
                         >
-                          Sign In
+                          {isSignInLoading ? (
+                            <div className="flex items-center gap-2">
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <span>Signing in...</span>
+                            </div>
+                          ) : (
+                            'Sign In'
+                          )}
                         </Button>
                       </form>
 

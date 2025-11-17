@@ -32,7 +32,7 @@ import {
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
-import { useMenuItems, useMenuCategories, useReservations, useTakeoutOrders } from '../lib/firebase-hooks';
+import { useMenuItems, useMenuCategories, useReservations, useTakeoutOrders, useFloors } from '../lib/firebase-hooks';
 import {
   BarChart3,
   TrendingUp,
@@ -122,7 +122,7 @@ type TableShape =
   | "booth-curved"
   | "u-shape"
   | "l-shape";
-type TableStatus = "available" | "reserved" | "occupied";
+type TableStatus = "available" | "reserved" | "occupied" | "cleaning";
 type ReservationStatus = "waiting" | "seated" | "completed" | "cancelled";
 type OrderStatus =
   | "pending"
@@ -751,7 +751,7 @@ function TableComponent({
     [table.id, table.position, isEditMode],
   );
 
-  // Professional color system - Green (Available), Orange (Occupied), Blue/Gray (Reserved)
+  // Professional color system - Green (Available), Orange (Occupied), Blue/Gray (Reserved), Yellow (Cleaning)
   const statusStyles = {
     available: {
       bg: "bg-gradient-to-br from-emerald-500/90 to-emerald-600/90",
@@ -779,6 +779,15 @@ function TableComponent({
       text: "text-white",
       indicator: "bg-orange-300",
       indicatorRing: "ring-orange-400/40",
+    },
+    cleaning: {
+      bg: "bg-gradient-to-br from-yellow-500/90 to-yellow-600/90",
+      border: "border-yellow-400/50",
+      shadow: "shadow-lg shadow-yellow-900/20",
+      hoverBg: "hover:from-yellow-500 hover:to-yellow-600",
+      text: "text-white",
+      indicator: "bg-yellow-300",
+      indicatorRing: "ring-yellow-400/40",
     },
   };
 
@@ -1292,6 +1301,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   const [floorName, setFloorName] = useState("");
   const [floors, setFloors] = useState<Floor[]>(mockFloors);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [waitlist, setWaitlist] = useState<WaitlistGuest[]>(isDemo ? mockWaitlist : []);
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [takeoutOrders, setTakeoutOrders] = useState<TakeoutOrder[]>([]);
@@ -1312,11 +1322,109 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   const [selectedReservation, setSelectedReservation] =
     useState<Reservation | WaitlistGuest | null>(null);
 
+  // Helper functions to convert between Firebase types and component types
+  const convertFirebaseTableToComponent = (fbTable: import('../lib/firebase-service').Table): FloorTable => {
+    // Map Firebase shape names to component shape names
+    const shapeMap: Record<string, TableShape> = {
+      'rectangle': 'rectangular',
+      'round': 'round',
+      'square': 'square',
+      'oval': 'oval',
+      'booth': 'booth',
+      'bar': 'bar',
+      'banquet': 'banquet',
+      'semicircle': 'semicircle',
+      'triangle': 'triangle',
+      'octagon': 'octagon',
+      'communal': 'communal',
+      'high-top': 'high-top',
+      'booth-curved': 'booth-curved',
+      'u-shape': 'u-shape',
+      'l-shape': 'l-shape',
+    };
+
+    return {
+      id: fbTable.id,
+      number: fbTable.number,
+      floorId: fbTable.floorId,
+      capacity: fbTable.capacity,
+      shape: shapeMap[fbTable.shape] || 'rectangular',
+      status: fbTable.status,
+      position: fbTable.position,
+      rotation: fbTable.rotation,
+      scale: fbTable.scale,
+      reservationId: fbTable.reservationId,
+      serverId: fbTable.serverId,
+    };
+  };
+
+  const convertFirebaseFloorToComponent = (fbFloor: import('../lib/firebase-service').Floor): Floor => {
+    return {
+      id: fbFloor.id,
+      name: fbFloor.name,
+      tableCount: fbFloor.tableCount,
+      layout: fbFloor.layout.map(convertFirebaseTableToComponent),
+      lastModified: fbFloor.lastModified,
+    };
+  };
+
+  const convertComponentTableToFirebase = (table: FloorTable): Partial<import('../lib/firebase-service').Table> => {
+    // Map component shape names to Firebase shape names
+    const shapeMap: Record<TableShape, import('../lib/firebase-service').Table['shape']> = {
+      'rectangular': 'rectangle',
+      'round': 'round',
+      'square': 'square',
+      'diamond': 'square',
+      'oval': 'oval',
+      'hexagon': 'octagon',
+      'booth': 'booth',
+      'bar': 'bar',
+      'banquet': 'banquet',
+      'semicircle': 'semicircle',
+      'triangle': 'triangle',
+      'octagon': 'octagon',
+      'communal': 'communal',
+      'high-top': 'high-top',
+      'booth-curved': 'booth-curved',
+      'u-shape': 'u-shape',
+      'l-shape': 'l-shape',
+    };
+
+    // Build the Firebase table object, only including defined fields
+    // Firebase doesn't accept undefined values - we must omit them
+    const firebaseTable: Partial<import('../lib/firebase-service').Table> = {
+      id: table.id,
+      number: table.number,
+      floorId: table.floorId,
+      capacity: table.capacity,
+      shape: shapeMap[table.shape],
+      status: table.status,
+      position: table.position,
+    };
+
+    // Only add optional fields if they are defined (not undefined)
+    if (table.rotation !== undefined) {
+      firebaseTable.rotation = table.rotation;
+    }
+    if (table.scale !== undefined) {
+      firebaseTable.scale = table.scale;
+    }
+    if (table.reservationId !== undefined) {
+      firebaseTable.reservationId = table.reservationId;
+    }
+    if (table.serverId !== undefined) {
+      firebaseTable.serverId = table.serverId;
+    }
+
+    return firebaseTable;
+  };
+
   // Firebase integration
   const firebaseMenuItems = useMenuItems();
   const firebaseCategories = useMenuCategories();
   const firebaseReservations = useReservations();
   const firebaseTakeoutOrders = useTakeoutOrders();
+  const firebaseFloors = useFloors();
 
   // Load menu items from Firebase (only in realtime mode)
   useEffect(() => {
@@ -1375,6 +1483,26 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       setTakeoutOrders(mockTakeoutOrders);
     }
   }, [firebaseTakeoutOrders.takeoutOrders, firebaseTakeoutOrders.loading, isDemo]);
+
+  // Load floors from Firebase (only in realtime mode)
+  useEffect(() => {
+    if (!isDemo && !firebaseFloors.loading && firebaseFloors.floors.length > 0) {
+      const convertedFloors = firebaseFloors.floors.map(convertFirebaseFloorToComponent);
+      setFloors(convertedFloors);
+      // Always set selected floor to first floor (index 0) when floors are loaded
+      setSelectedFloor(convertedFloors[0]);
+    } else if (!isDemo && !firebaseFloors.loading) {
+      // No floors in Firebase - set empty array
+      setFloors([]);
+      setSelectedFloor(null);
+    } else if (isDemo) {
+      // Demo mode - use mock data
+      setFloors(mockFloors);
+      if (!selectedFloor) {
+        setSelectedFloor(mockFloors[0]);
+      }
+    }
+  }, [firebaseFloors.floors, firebaseFloors.loading, isDemo]);
 
   // Restaurant listing state
   const [restaurantInfo, setRestaurantInfo] = useState({
@@ -1516,7 +1644,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   };
 
   // Table editing functions
-  const handleAddTable = (shape: TableShape) => {
+  const handleAddTable = async (shape: TableShape) => {
     if (!selectedFloor) return;
 
     const newTable: FloorTable = {
@@ -1534,48 +1662,80 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       rotation: 0,
     };
 
-    const updatedFloors = floors.map((f) =>
-      f.id === selectedFloor.id
-        ? {
-            ...f,
-            layout: [...f.layout, newTable],
-            tableCount: f.tableCount + 1,
-          }
-        : f,
-    );
-    setFloors(updatedFloors);
-    setSelectedFloor(
-      updatedFloors.find((f) => f.id === selectedFloor.id) ||
-        null,
-    );
-    setSelectedTable(newTable);
-    toast.success(`New ${shape} table added`);
+    try {
+      if (isDemo) {
+        // Demo mode - update local state only
+        const updatedFloors = floors.map((f) =>
+          f.id === selectedFloor.id
+            ? {
+                ...f,
+                layout: [...f.layout, newTable],
+                tableCount: f.tableCount + 1,
+              }
+            : f,
+        );
+        setFloors(updatedFloors);
+        setSelectedFloor(
+          updatedFloors.find((f) => f.id === selectedFloor.id) || null,
+        );
+      } else {
+        // Realtime mode - update floor in Firebase
+        const updatedLayout = [...selectedFloor.layout, newTable];
+        const firebaseLayout = updatedLayout.map(convertComponentTableToFirebase);
+        await firebaseFloors.updateFloor(selectedFloor.id, {
+          layout: firebaseLayout as import('../lib/firebase-service').Table[],
+          tableCount: selectedFloor.tableCount + 1,
+          lastModified: new Date().toISOString(),
+        });
+      }
+      setSelectedTable(newTable);
+      toast.success(`New ${shape} table added`);
+    } catch (error) {
+      console.error('Error adding table:', error);
+      toast.error("Failed to add table");
+    }
   };
 
-  const handleDeleteTable = () => {
+  const handleDeleteTable = async () => {
     if (!selectedTable || !selectedFloor) return;
 
-    const updatedFloors = floors.map((f) =>
-      f.id === selectedFloor.id
-        ? {
-            ...f,
-            layout: f.layout.filter(
-              (t) => t.id !== selectedTable.id,
-            ),
-            tableCount: f.tableCount - 1,
-          }
-        : f,
-    );
-    setFloors(updatedFloors);
-    setSelectedFloor(
-      updatedFloors.find((f) => f.id === selectedFloor.id) ||
-        null,
-    );
-    setSelectedTable(null);
-    toast.success("Table deleted");
+    try {
+      if (isDemo) {
+        // Demo mode - update local state only
+        const updatedFloors = floors.map((f) =>
+          f.id === selectedFloor.id
+            ? {
+                ...f,
+                layout: f.layout.filter((t) => t.id !== selectedTable.id),
+                tableCount: f.tableCount - 1,
+              }
+            : f,
+        );
+        setFloors(updatedFloors);
+        setSelectedFloor(
+          updatedFloors.find((f) => f.id === selectedFloor.id) || null,
+        );
+      } else {
+        // Realtime mode - update floor in Firebase
+        const updatedLayout = selectedFloor.layout.filter(
+          (t) => t.id !== selectedTable.id,
+        );
+        const firebaseLayout = updatedLayout.map(convertComponentTableToFirebase);
+        await firebaseFloors.updateFloor(selectedFloor.id, {
+          layout: firebaseLayout as import('../lib/firebase-service').Table[],
+          tableCount: selectedFloor.tableCount - 1,
+          lastModified: new Date().toISOString(),
+        });
+      }
+      setSelectedTable(null);
+      toast.success("Table deleted");
+    } catch (error) {
+      console.error('Error deleting table:', error);
+      toast.error("Failed to delete table");
+    }
   };
 
-  const handleMoveTable = (
+  const handleMoveTable = async (
     direction: "up" | "down" | "left" | "right",
   ) => {
     if (!selectedTable || !selectedFloor) return;
@@ -1598,108 +1758,80 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
         break;
     }
 
-    const updatedFloors = floors.map((f) =>
-      f.id === selectedFloor.id
-        ? {
-            ...f,
-            layout: f.layout.map((t) =>
-              t.id === selectedTable.id
-                ? { ...t, position: newPosition }
-                : t,
-            ),
-          }
-        : f,
+    const updatedLayout = selectedFloor.layout.map((t) =>
+      t.id === selectedTable.id ? { ...t, position: newPosition } : t
     );
-    setFloors(updatedFloors);
-    setSelectedFloor(
-      updatedFloors.find((f) => f.id === selectedFloor.id) ||
-        null,
-    );
-    setSelectedTable({
-      ...selectedTable,
-      position: newPosition,
-    });
+    
+    try {
+      await updateFloorLayout(selectedFloor.id, updatedLayout);
+      setSelectedTable({
+        ...selectedTable,
+        position: newPosition,
+      });
+    } catch (error) {
+      console.error('Error moving table:', error);
+      toast.error("Failed to move table");
+    }
   };
 
-  const handleRotateTable = () => {
+  const handleRotateTable = async () => {
     if (!selectedTable || !selectedFloor) return;
 
     const newRotation =
       ((selectedTable.rotation || 0) + 45) % 360;
 
-    const updatedFloors = floors.map((f) =>
-      f.id === selectedFloor.id
-        ? {
-            ...f,
-            layout: f.layout.map((t) =>
-              t.id === selectedTable.id
-                ? { ...t, rotation: newRotation }
-                : t,
-            ),
-          }
-        : f,
+    const updatedLayout = selectedFloor.layout.map((t) =>
+      t.id === selectedTable.id ? { ...t, rotation: newRotation } : t
     );
-    setFloors(updatedFloors);
-    setSelectedFloor(
-      updatedFloors.find((f) => f.id === selectedFloor.id) ||
-        null,
-    );
-    setSelectedTable({
-      ...selectedTable,
-      rotation: newRotation,
-    });
+    
+    try {
+      await updateFloorLayout(selectedFloor.id, updatedLayout);
+      setSelectedTable({
+        ...selectedTable,
+        rotation: newRotation,
+      });
+    } catch (error) {
+      console.error('Error rotating table:', error);
+      toast.error("Failed to rotate table");
+    }
   };
 
-  const handleUpdateTableCapacity = (capacity: number) => {
+  const handleUpdateTableCapacity = async (capacity: number) => {
     if (!selectedTable || !selectedFloor) return;
 
-    const updatedFloors = floors.map((f) =>
-      f.id === selectedFloor.id
-        ? {
-            ...f,
-            layout: f.layout.map((t) =>
-              t.id === selectedTable.id
-                ? { ...t, capacity }
-                : t,
-            ),
-          }
-        : f,
+    const updatedLayout = selectedFloor.layout.map((t) =>
+      t.id === selectedTable.id ? { ...t, capacity } : t
     );
-    setFloors(updatedFloors);
-    setSelectedFloor(
-      updatedFloors.find((f) => f.id === selectedFloor.id) ||
-        null,
-    );
-    setSelectedTable({ ...selectedTable, capacity });
+    
+    try {
+      await updateFloorLayout(selectedFloor.id, updatedLayout);
+      setSelectedTable({ ...selectedTable, capacity });
+    } catch (error) {
+      console.error('Error updating table capacity:', error);
+      toast.error("Failed to update table capacity");
+    }
   };
 
-  const handleUpdateTableScale = (scale: number) => {
+  const handleUpdateTableScale = async (scale: number) => {
     if (!selectedTable || !selectedFloor) return;
 
     // Clamp scale between 0.5 and 2.0
     const clampedScale = Math.max(0.5, Math.min(2.0, scale));
 
-    const updatedFloors = floors.map((f) =>
-      f.id === selectedFloor.id
-        ? {
-            ...f,
-            layout: f.layout.map((t) =>
-              t.id === selectedTable.id
-                ? { ...t, scale: clampedScale }
-                : t,
-            ),
-          }
-        : f,
+    const updatedLayout = selectedFloor.layout.map((t) =>
+      t.id === selectedTable.id ? { ...t, scale: clampedScale } : t
     );
-    setFloors(updatedFloors);
-    setSelectedFloor(
-      updatedFloors.find((f) => f.id === selectedFloor.id) ||
-        null,
-    );
-    setSelectedTable({ ...selectedTable, scale: clampedScale });
+    
+    try {
+      await updateFloorLayout(selectedFloor.id, updatedLayout);
+      setSelectedTable({ ...selectedTable, scale: clampedScale });
+    } catch (error) {
+      console.error('Error updating table scale:', error);
+      toast.error("Failed to update table scale");
+    }
   };
 
-  const handleTableDrop = (
+  const handleTableDrop = async (
     tableId: string,
     x: number,
     y: number,
@@ -1712,27 +1844,42 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       y: Math.max(0, Math.min(600 - 100, y)),
     };
 
-    const updatedFloors = floors.map((f) =>
-      f.id === selectedFloor.id
-        ? {
-            ...f,
-            layout: f.layout.map((t) =>
-              t.id === tableId
-                ? { ...t, position: newPosition }
-                : t,
-            ),
-          }
-        : f,
+    const updatedLayout = selectedFloor.layout.map((t) =>
+      t.id === tableId ? { ...t, position: newPosition } : t
     );
-    setFloors(updatedFloors);
-    setSelectedFloor(
-      updatedFloors.find((f) => f.id === selectedFloor.id) ||
-        null,
-    );
-    if (selectedTable?.id === tableId) {
-      setSelectedTable({
-        ...selectedTable,
-        position: newPosition,
+    
+    try {
+      await updateFloorLayout(selectedFloor.id, updatedLayout);
+      if (selectedTable?.id === tableId) {
+        setSelectedTable({
+          ...selectedTable,
+          position: newPosition,
+        });
+      }
+    } catch (error) {
+      console.error('Error moving table:', error);
+      toast.error("Failed to move table");
+    }
+  };
+
+  // Helper function to update floor layout in Firebase or local state
+  const updateFloorLayout = async (floorId: string, updatedLayout: FloorTable[]) => {
+    if (isDemo) {
+      // Demo mode - update local state only
+      const updatedFloors = floors.map((f) =>
+        f.id === floorId ? { ...f, layout: updatedLayout, lastModified: new Date().toISOString() } : f
+      );
+      setFloors(updatedFloors);
+      const updatedFloor = updatedFloors.find((f) => f.id === floorId);
+      if (updatedFloor) {
+        setSelectedFloor(updatedFloor);
+      }
+    } else {
+      // Realtime mode - update in Firebase
+      const firebaseLayout = updatedLayout.map(convertComponentTableToFirebase);
+      await firebaseFloors.updateFloor(floorId, {
+        layout: firebaseLayout as import('../lib/firebase-service').Table[],
+        lastModified: new Date().toISOString(),
       });
     }
   };
@@ -1756,55 +1903,98 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     setIsFloorDialogOpen(true);
   };
 
-  const handleSaveFloor = () => {
+  const handleSaveFloor = async () => {
     if (!floorName.trim()) {
       toast.error("Please enter a floor name");
       return;
     }
 
-    if (editingFloor) {
-      // Update existing floor
-      const updatedFloors = floors.map((f) =>
-        f.id === editingFloor.id
-          ? { ...f, name: floorName }
-          : f,
-      );
-      setFloors(updatedFloors);
-      if (selectedFloor?.id === editingFloor.id) {
-        setSelectedFloor({ ...selectedFloor, name: floorName });
+    try {
+      if (editingFloor) {
+        // Update existing floor
+        if (isDemo) {
+          // Demo mode - update local state only
+          const updatedFloors = floors.map((f) =>
+            f.id === editingFloor.id
+              ? { ...f, name: floorName }
+              : f,
+          );
+          setFloors(updatedFloors);
+          if (selectedFloor?.id === editingFloor.id) {
+            setSelectedFloor({ ...selectedFloor, name: floorName });
+          }
+        } else {
+          // Realtime mode - update in Firebase
+          await firebaseFloors.updateFloor(editingFloor.id, { 
+            name: floorName,
+            lastModified: new Date().toISOString()
+          });
+        }
+        toast.success("Floor updated successfully");
+      } else {
+        // Add new floor
+        if (isDemo) {
+          // Demo mode - update local state only
+          const newFloor: Floor = {
+            id: `floor-${Date.now()}`,
+            name: floorName,
+            tableCount: 0,
+            layout: [],
+            lastModified: new Date().toISOString(),
+          };
+          setFloors([...floors, newFloor]);
+          setSelectedFloor(newFloor);
+        } else {
+          // Realtime mode - create in Firebase
+          const newFloor = await firebaseFloors.createFloor({
+            name: floorName,
+            tableCount: 0,
+            layout: [],
+            lastModified: new Date().toISOString(),
+          });
+          if (newFloor) {
+            setSelectedFloor(convertFirebaseFloorToComponent(newFloor));
+          }
+        }
+        toast.success("Floor added successfully");
       }
-      toast.success("Floor updated successfully");
-    } else {
-      // Add new floor
-      const newFloor: Floor = {
-        id: `floor-${Date.now()}`,
-        name: floorName,
-        tableCount: 0,
-        layout: [],
-        lastModified: new Date().toISOString(),
-      };
-      setFloors([...floors, newFloor]);
-      setSelectedFloor(newFloor);
-      toast.success("Floor added successfully");
+      setIsFloorDialogOpen(false);
+      setEditingFloor(null);
+      setFloorName("");
+    } catch (error) {
+      console.error('Error saving floor:', error);
+      toast.error("Failed to save floor");
     }
-    setIsFloorDialogOpen(false);
-    setEditingFloor(null);
-    setFloorName("");
   };
 
-  const handleDeleteFloor = (floorId: string) => {
+  const handleDeleteFloor = async (floorId: string) => {
     if (floors.length === 1) {
       toast.error("Cannot delete the last floor");
       return;
     }
-    const updatedFloors = floors.filter(
-      (f) => f.id !== floorId,
-    );
-    setFloors(updatedFloors);
-    if (selectedFloor?.id === floorId) {
-      setSelectedFloor(updatedFloors[0]);
+    
+    try {
+      if (isDemo) {
+        // Demo mode - update local state only
+        const updatedFloors = floors.filter((f) => f.id !== floorId);
+        setFloors(updatedFloors);
+        if (selectedFloor?.id === floorId) {
+          setSelectedFloor(updatedFloors[0]);
+        }
+      } else {
+        // Realtime mode - delete from Firebase
+        await firebaseFloors.deleteFloor(floorId);
+        // Update selected floor if needed
+        if (selectedFloor?.id === floorId && floors.length > 1) {
+          const remainingFloors = floors.filter((f) => f.id !== floorId);
+          setSelectedFloor(remainingFloors[0] || null);
+        }
+      }
+      toast.success("Floor deleted successfully");
+    } catch (error) {
+      console.error('Error deleting floor:', error);
+      toast.error("Failed to delete floor");
     }
-    toast.success("Floor deleted successfully");
   };
 
   const handleUpdateOrderStatus = (
@@ -3301,79 +3491,6 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                     tables={floors.flatMap((f) => f.layout)}
                     onReservationClick={(reservation) => {
                       setSelectedReservation(reservation);
-                    }}
-                    onSeatGuest={(id, tableId) => {
-                      if (id.startsWith("wait-")) {
-                        // Seating from waitlist
-                        const guest = waitlist.find(
-                          (g) => g.id === id,
-                        );
-                        if (guest) {
-                          const updatedWaitlist =
-                            waitlist.filter((g) => g.id !== id);
-                          setWaitlist(updatedWaitlist);
-
-                          // Update table status to occupied
-                          const updatedFloors = floors.map(
-                            (f) => ({
-                              ...f,
-                              layout: f.layout.map((t) =>
-                                t.id === tableId
-                                  ? {
-                                      ...t,
-                                      status:
-                                        "occupied" as TableStatus,
-                                    }
-                                  : t,
-                              ),
-                            }),
-                          );
-                          setFloors(updatedFloors);
-
-                          toast.success(
-                            `${guest.guestName} seated at table ${floors.flatMap((f) => f.layout).find((t) => t.id === tableId)?.number || ""}`,
-                          );
-                        }
-                      } else {
-                        // Seating reservation
-                        const updatedReservations =
-                          reservations.map((r) =>
-                            r.id === id
-                              ? {
-                                  ...r,
-                                  status:
-                                    "seated" as ReservationStatus,
-                                  tableId,
-                                }
-                              : r,
-                          );
-                        setReservations(updatedReservations);
-
-                        // Update table status to occupied
-                        const updatedFloors = floors.map(
-                          (f) => ({
-                            ...f,
-                            layout: f.layout.map((t) =>
-                              t.id === tableId
-                                ? {
-                                    ...t,
-                                    status:
-                                      "occupied" as TableStatus,
-                                    reservationId: id,
-                                  }
-                                : t,
-                            ),
-                          }),
-                        );
-                        setFloors(updatedFloors);
-
-                        const reservation = reservations.find(
-                          (r) => r.id === id,
-                        );
-                        toast.success(
-                          `${reservation?.guestName || "Guest"} seated at table ${floors.flatMap((f) => f.layout).find((t) => t.id === tableId)?.number || ""}`,
-                        );
-                      }
                     }}
                   />
                 </div>

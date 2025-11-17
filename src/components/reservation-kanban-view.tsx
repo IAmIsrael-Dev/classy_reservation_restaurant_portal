@@ -5,7 +5,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { Users, Clock, Phone, AlertCircle, Calendar, Utensils, CheckCircle } from 'lucide-react';
 
 type ReservationStatus = 'waiting' | 'seated' | 'completed';
-type TableStatus = 'available' | 'reserved' | 'occupied';
+type TableStatus = 'available' | 'reserved' | 'occupied' | 'cleaning';
 
 interface Position {
   x: number;
@@ -51,14 +51,14 @@ interface ReservationKanbanViewProps {
   waitlist: WaitlistGuest[];
   tables: FloorTable[];
   onReservationClick: (reservation: Reservation | WaitlistGuest) => void;
-  onSeatGuest: (id: string, tableId: string) => void;
 }
 
 export function ReservationKanbanView({ 
   reservations, 
   waitlist, 
   tables, 
-  onReservationClick}: ReservationKanbanViewProps) {
+  onReservationClick
+}: ReservationKanbanViewProps) {
   const waitingReservations = reservations.filter(r => r.status === 'waiting');
   const seatedReservations = reservations.filter(r => r.status === 'seated');
   const completedReservations = reservations.filter(r => r.status === 'completed');
