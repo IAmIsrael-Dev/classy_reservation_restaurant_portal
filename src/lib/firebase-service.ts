@@ -174,6 +174,18 @@ const COLLECTIONS = {
 // ============================================================================
 
 /**
+ * Remove undefined values from an object (Firestore doesn't accept them)
+ */
+const removeUndefined = <T extends object>(obj: T): Partial<T> => {
+  return Object.entries(obj).reduce((acc, [key, value]) => {
+    if (value !== undefined) {
+      acc[key as keyof T] = value;
+    }
+    return acc;
+  }, {} as Partial<T>);
+};
+
+/**
  * Safely parse Firestore document with fallback values
  */
 const parseDocument = <T extends object>(doc: DocumentData, defaults: Partial<T> = {}): T => {
@@ -281,10 +293,11 @@ export const guestService = {
   async update(id: string, updates: Partial<Guest>): Promise<boolean> {
     try {
       const docRef = doc(db, COLLECTIONS.GUESTS, id);
-      await updateDoc(docRef, {
+      const cleanedUpdates = removeUndefined({
         ...updates,
         updatedAt: Timestamp.now(),
       });
+      await updateDoc(docRef, cleanedUpdates);
       return true;
     } catch (error) {
       console.error('Error updating guest:', error);
@@ -404,10 +417,11 @@ export const tableService = {
   async update(id: string, updates: Partial<Table>): Promise<boolean> {
     try {
       const docRef = doc(db, COLLECTIONS.TABLES, id);
-      await updateDoc(docRef, {
+      const cleanedUpdates = removeUndefined({
         ...updates,
         updatedAt: Timestamp.now(),
       });
+      await updateDoc(docRef, cleanedUpdates);
       return true;
     } catch (error) {
       console.error('Error updating table:', error);
@@ -525,10 +539,11 @@ export const floorService = {
   async update(id: string, updates: Partial<Floor>): Promise<boolean> {
     try {
       const docRef = doc(db, COLLECTIONS.FLOORS, id);
-      await updateDoc(docRef, {
+      const cleanedUpdates = removeUndefined({
         ...updates,
         updatedAt: Timestamp.now(),
       });
+      await updateDoc(docRef, cleanedUpdates);
       return true;
     } catch (error) {
       console.error('Error updating floor:', error);
@@ -754,10 +769,11 @@ export const menuItemService = {
   async update(id: string, updates: Partial<MenuItem>): Promise<boolean> {
     try {
       const docRef = doc(db, COLLECTIONS.MENU_ITEMS, id);
-      await updateDoc(docRef, {
+      const cleanedUpdates = removeUndefined({
         ...updates,
         updatedAt: Timestamp.now(),
       });
+      await updateDoc(docRef, cleanedUpdates);
       return true;
     } catch (error) {
       console.error('Error updating menu item:', error);

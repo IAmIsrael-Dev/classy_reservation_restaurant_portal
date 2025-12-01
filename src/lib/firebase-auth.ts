@@ -164,8 +164,19 @@ export const createRestaurantProfile = async (
   try {
     const profileRef = getProfileRef(userId);
     
-    const newProfile: RestaurantProfileInput = {
-      ...profileData,
+    // Filter out undefined values (Firestore doesn't accept them)
+    const cleanedData = Object.entries(profileData).reduce(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = value;
+        }
+        return acc;
+      },
+      {} as Record<string, unknown>
+    );
+    
+    const newProfile = {
+      ...cleanedData,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
@@ -190,8 +201,19 @@ export const updateRestaurantProfile = async (
   try {
     const profileRef = getProfileRef(userId);
     
+    // Filter out undefined values (Firestore doesn't accept them)
+    const cleanedData = Object.entries(profileData).reduce(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = value;
+        }
+        return acc;
+      },
+      {} as Record<string, unknown>
+    );
+    
     const updates = {
-      ...profileData,
+      ...cleanedData,
       updatedAt: serverTimestamp(),
     };
     

@@ -18,13 +18,13 @@ import type { FirebaseStorage } from 'firebase/storage';
 // ============================================================================
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBgy6ulDXTfCKPDZPpodpJElOTXf2KF8-o",
-  authDomain: "demoapp1-65f54.firebaseapp.com",
-  databaseURL: "https://demoapp1-65f54-default-rtdb.firebaseio.com",
-  projectId: "demoapp1-65f54",
-  storageBucket: "demoapp1-65f54.firebasestorage.app",
-  messagingSenderId: "945225510979",
-  appId: "1:945225510979:web:f2e6d03ed559c6c6a1a4f6"
+  apiKey: "AIzaSyDtpbLxOG487GanuXEJKbifebGoANNIuas",
+  authDomain: "classyreserveai.firebaseapp.com",
+  projectId: "classyreserveai",
+  storageBucket: "classyreserveai.firebasestorage.app",
+  messagingSenderId: "798527729998",
+  appId: "1:798527729998:web:f7bc705c4000f9134c6e1f",
+  measurementId: "G-QY70QN5G2W"
 };
 
 // ============================================================================
