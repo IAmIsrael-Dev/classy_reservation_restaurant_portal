@@ -36,6 +36,11 @@ import { useMenuItems, useMenuCategories, useReservations, useTakeoutOrders, use
 import { useAuth } from './auth-provider';
 import { ImageUpload } from './image-upload';
 import { uploadRestaurantProfileImage } from '../lib/firebase-storage';
+import { MessagingInbox } from './messaging-inbox';
+import { MessagingChat } from './messaging-chat';
+import { HostManagement } from './HostManagement';
+import { SecuritySettings } from './SecuritySettings';
+import type { Conversation } from '../lib/firebase-service';
 import {
   BarChart3,
   TrendingUp,
@@ -90,6 +95,8 @@ import {
   CalendarDays,
   UserPlus,
   Columns,
+  MessageSquare,
+  Lock,
 } from "lucide-react";
 import {
   BarChart,
@@ -1324,6 +1331,9 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   const selectedDate = new Date();
   const [selectedReservation, setSelectedReservation] =
     useState<Reservation | WaitlistGuest | null>(null);
+  
+  // Messaging state
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
 
   // Helper functions to convert between Firebase types and component types
   const convertFirebaseTableToComponent = (fbTable: import('../lib/firebase-service').Table): FloorTable => {
@@ -1423,16 +1433,24 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   };
 
   // Firebase integration
-  const { restaurantProfile, updateRestaurantProfile, user } = useAuth();
+  const { restaurantProfile, updateRestaurantProfile, user, selectedRestaurantId } = useAuth();
   const firebaseMenuItems = useMenuItems();
   const firebaseCategories = useMenuCategories();
   const firebaseReservations = useReservations();
   const firebaseTakeoutOrders = useTakeoutOrders();
   const firebaseFloors = useFloors();
 
+  // Set restaurant ID in localStorage for messaging and other services
+  useEffect(() => {
+    const restaurantId = selectedRestaurantId || user?.uid;
+    if (restaurantId) {
+      localStorage.setItem('currentRestaurantId', restaurantId);
+    }
+  }, [selectedRestaurantId, user]);
+
   // Load menu items from Firebase (only in realtime mode)
   useEffect(() => {
-    if (!isDemo && !firebaseMenuItems.loading && firebaseMenuItems.menuItems.length > 0) {
+    if (!isDemo && !firebaseMenuItems.loading && firebaseMenuItems.menuItems?.length > 0) {
       const convertedItems = firebaseMenuItems.menuItems.map(item => ({
         id: item.id,
         name: item.name,
@@ -1456,8 +1474,8 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
 
   // Load categories from Firebase (only in realtime mode)
   useEffect(() => {
-    if (!isDemo && !firebaseCategories.loading && firebaseCategories.categories.length > 0) {
-      const categoryNames = firebaseCategories.categories.map(cat => cat.name);
+    if (!isDemo && !firebaseCategories.loading && firebaseCategories.menuCategories?.length > 0) {
+      const categoryNames = firebaseCategories.menuCategories.map(cat => cat.name);
       setMenuCategories(categoryNames);
     } else if (!isDemo && !firebaseCategories.loading) {
       // No data - set to empty array
@@ -1466,12 +1484,12 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       // Demo mode - use default categories
       setMenuCategories(["Starters", "Entrees", "Desserts", "Beverages"]);
     }
-  }, [firebaseCategories.categories, firebaseCategories.loading, isDemo]);
+  }, [firebaseCategories.menuCategories, firebaseCategories.loading, isDemo]);
 
   // Load reservations from Firebase (only in realtime mode)
   useEffect(() => {
     if (!isDemo && !firebaseReservations.loading) {
-      setReservations(firebaseReservations.reservations);
+      setReservations(firebaseReservations.reservations || []);
     } else if (isDemo) {
       // Demo mode - use mock data
       setReservations(recentReservations);
@@ -1481,7 +1499,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   // Load takeout orders from Firebase (only in realtime mode)
   useEffect(() => {
     if (!isDemo && !firebaseTakeoutOrders.loading) {
-      setTakeoutOrders(firebaseTakeoutOrders.takeoutOrders);
+      setTakeoutOrders(firebaseTakeoutOrders.takeoutOrders || []);
     } else if (isDemo) {
       // Demo mode - use mock data
       setTakeoutOrders(mockTakeoutOrders);
@@ -1490,7 +1508,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
 
   // Load floors from Firebase (only in realtime mode)
   useEffect(() => {
-    if (!isDemo && !firebaseFloors.loading && firebaseFloors.floors.length > 0) {
+    if (!isDemo && !firebaseFloors.loading && firebaseFloors.floors?.length > 0) {
       const convertedFloors = firebaseFloors.floors.map(convertFirebaseFloorToComponent);
       setFloors(convertedFloors);
       
@@ -1737,18 +1755,42 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       const addressParts = restaurantInfo.address.split(',').map(s => s.trim());
       const stateZip = addressParts[addressParts.length - 1]?.split(' ') || [];
       
-      await updateRestaurantProfile({
-        restaurantName: restaurantInfo.name,
-        cuisineType: restaurantInfo.cuisine,
-        description: restaurantInfo.description,
-        address: addressParts[0] || restaurantInfo.address,
-        city: addressParts[1] || '',
-        state: stateZip[0] || '',
-        zipCode: stateZip[1] || '',
-        phone: restaurantInfo.phone,
-        email: restaurantInfo.email,
-        photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
-      });
+      // Check if using custom auth (selectedRestaurantId without Firebase user)
+      if (selectedRestaurantId && !user) {
+        console.log('[Save] Using custom auth, restaurant ID:', selectedRestaurantId);
+        // Update restaurant data directly using restaurant ID
+        const { restaurantSearchService } = await import('../lib/firebase-service');
+        const success = await restaurantSearchService.updateRestaurantData(selectedRestaurantId, {
+          restaurantName: restaurantInfo.name,
+          cuisineType: restaurantInfo.cuisine,
+          description: restaurantInfo.description,
+          address: addressParts[0] || restaurantInfo.address,
+          city: addressParts[1] || '',
+          state: stateZip[0] || '',
+          zipCode: stateZip[1] || '',
+          phone: restaurantInfo.phone,
+          photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
+        });
+        
+        if (!success) {
+          throw new Error('Failed to update restaurant data - likely a Firebase security rules issue');
+        }
+      } else if (user) {
+        console.log('[Save] Using Firebase auth, user ID:', user.uid);
+        // Firebase auth - use the existing method
+        await updateRestaurantProfile({
+          restaurantName: restaurantInfo.name,
+          cuisineType: restaurantInfo.cuisine,
+          description: restaurantInfo.description,
+          address: addressParts[0] || restaurantInfo.address,
+          city: addressParts[1] || '',
+          state: stateZip[0] || '',
+          zipCode: stateZip[1] || '',
+          phone: restaurantInfo.phone,
+          email: restaurantInfo.email,
+          photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
+        });
+      }
       
       toast.success("Restaurant information updated successfully");
     } catch (error) {
@@ -1778,7 +1820,13 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
         };
       });
       
-      await updateRestaurantProfile({ openingHours });
+      // Check if using custom auth
+      if (selectedRestaurantId && !user) {
+        const { restaurantSearchService } = await import('../lib/firebase-service');
+        await restaurantSearchService.updateRestaurantData(selectedRestaurantId, { openingHours });
+      } else if (user) {
+        await updateRestaurantProfile({ openingHours });
+      }
       
       toast.success("Hours of operation saved");
     } catch (error) {
@@ -2220,7 +2268,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   const handleAddCategory = async () => {
     if (newCategoryName.trim() && !menuCategories.includes(newCategoryName.trim())) {
       try {
-        await firebaseCategories.createCategory({
+        await firebaseCategories.createMenuCategory({
           name: newCategoryName.trim(),
           description: '',
           order: menuCategories.length,
@@ -2395,11 +2443,32 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                   Analytics
                 </TabsTrigger>
                 <TabsTrigger
+                  value="messages"
+                  className="data-[state=active]:bg-slate-700 whitespace-nowrap"
+                >
+                  <MessageSquare className="w-4 h-4 mr-2" />
+                  Messages
+                </TabsTrigger>
+                <TabsTrigger
+                  value="hosts"
+                  className="data-[state=active]:bg-slate-700 whitespace-nowrap"
+                >
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Hosts
+                </TabsTrigger>
+                <TabsTrigger
                   value="settings"
                   className="data-[state=active]:bg-slate-700 whitespace-nowrap"
                 >
                   <Settings className="w-4 h-4 mr-2" />
                   Settings
+                </TabsTrigger>
+                <TabsTrigger
+                  value="security"
+                  className="data-[state=active]:bg-slate-700 whitespace-nowrap"
+                >
+                  <Lock className="w-4 h-4 mr-2" />
+                  Security
                 </TabsTrigger>
               </TabsList>
             </ScrollArea>
@@ -4704,6 +4773,22 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
               </Card>
             </TabsContent>
 
+            {/* ===== MESSAGES TAB ===== */}
+            <TabsContent value="messages" className="h-[calc(100vh-200px)]">
+              {selectedConversation ? (
+                <MessagingChat
+                  conversation={selectedConversation}
+                  userRole="RESTAURANT_MANAGER"
+                  onBack={() => setSelectedConversation(null)}
+                />
+              ) : (
+                <MessagingInbox
+                  onSelectConversation={(conversation) => setSelectedConversation(conversation)}
+                  userRole="RESTAURANT_MANAGER"
+                />
+              )}
+            </TabsContent>
+
             {/* ===== SETTINGS TAB ===== */}
             <TabsContent value="settings" className="space-y-6">
               <Card className="p-4 sm:p-6 bg-slate-800 border-slate-700">
@@ -4995,6 +5080,22 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                   ))}
                 </div>
               </Card>
+            </TabsContent>
+
+            {/* ===== SECURITY TAB ===== */}
+            <TabsContent value="security" className="space-y-6">
+              {selectedRestaurantId || user?.uid ? (
+                <SecuritySettings restaurantId={selectedRestaurantId || user?.uid || ''} />
+              ) : (
+                <Card className="p-6 bg-slate-800 border-slate-700">
+                  <p className="text-slate-400">No restaurant selected</p>
+                </Card>
+              )}
+            </TabsContent>
+
+            {/* ===== HOST MANAGEMENT TAB ===== */}
+            <TabsContent value="hosts" className="space-y-6">
+              <HostManagement />
             </TabsContent>
           </Tabs>
         </div>

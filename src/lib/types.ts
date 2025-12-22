@@ -18,6 +18,9 @@ export interface AuthContextType {
   signUpWithEmail: (email: string, password: string, displayName: string) => Promise<void>;
   logout: () => Promise<void>;
   updateRestaurantProfile: (profile: Partial<RestaurantProfile>) => Promise<void>;
+  userRole: 'manager' | 'host' | null;
+  selectedRestaurantId: string | null;
+  setSelectedRestaurantId: (id: string | null) => void;
 }
 
 // ============================================================================
@@ -43,6 +46,9 @@ export interface RestaurantProfile {
   // Onboarding Status
   hasCompletedOnboarding: boolean;
   
+  // Host Management - Array of authorized host emails
+  authorizedHosts?: HostEmployee[];
+  
   // Timestamps
   createdAt: Timestamp | Date;
   updatedAt: Timestamp | Date;
@@ -53,6 +59,15 @@ export interface RestaurantProfile {
   capacity?: number;
   openingHours?: RestaurantHours;
   photos?: string[];
+}
+
+// Host/Employee Information
+export interface HostEmployee {
+  email: string;
+  name: string;
+  addedAt: Timestamp | Date;
+  addedBy: string; // Manager's user ID
+  status: 'active' | 'inactive';
 }
 
 // Type for creating/updating profiles (allows FieldValue for timestamps)
@@ -74,6 +89,9 @@ export interface RestaurantProfileInput {
   
   // Onboarding Status
   hasCompletedOnboarding?: boolean;
+  
+  // Host Management - Array of authorized host emails
+  authorizedHosts?: HostEmployee[];
   
   // Timestamps (allows FieldValue for serverTimestamp)
   createdAt?: Timestamp | Date | FieldValue;

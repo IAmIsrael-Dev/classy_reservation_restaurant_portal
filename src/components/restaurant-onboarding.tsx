@@ -9,6 +9,7 @@ import { Progress } from './ui/progress';
 import { Check } from 'lucide-react';
 import { ImageUpload } from './image-upload';
 import { uploadRestaurantProfileImage } from '../lib/firebase-storage';
+import { restaurantSearchService } from '../lib/firebase-service';
 import { toast } from 'sonner';
 
 const RESTAURANT_TYPES = [
@@ -27,8 +28,33 @@ const RESTAURANT_TYPES = [
   'Other'
 ];
 
-export function RestaurantOnboarding() {
+// Type definition for restaurant data
+interface RestaurantData {
+  restaurantName: string;
+  cuisineType: string;
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  phone: string;
+  openingHours: {
+    [key: string]: { open: string; close: string; isClosed: boolean };
+  };
+  capacity?: number;
+  description?: string;
+  website?: string;
+}
+
+interface RestaurantOnboardingProps {
+  initialEmail?: string;
+  initialPassword?: string;
+  onComplete?: (restaurantId: string, restaurantData: { restaurantName: string; email?: string }, masterPassword: string) => void;
+  onCancel?: () => void;
+}
+
+export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete, onCancel }: RestaurantOnboardingProps = {}) {
   const { updateRestaurantProfile, user } = useAuth();
+  const isCustomAuth = !!initialEmail; // Custom auth mode if email provided
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
@@ -71,18 +97,6 @@ export function RestaurantOnboarding() {
     setIsSubmitting(true);
     
     try {
-      // Upload image if one was selected
-      let uploadedImageUrl = formData.profileImageUrl;
-      if (selectedImageFile && user) {
-        try {
-          uploadedImageUrl = await uploadRestaurantProfileImage(user.uid, selectedImageFile);
-          toast.success('Profile image uploaded successfully!');
-        } catch (error) {
-          console.error('Error uploading image:', error);
-          toast.error('Failed to upload image, but continuing with setup');
-        }
-      }
-      
       // Build opening hours object
       const openingHours = {
         monday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
@@ -94,23 +108,117 @@ export function RestaurantOnboarding() {
         sunday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
       };
 
-      await updateRestaurantProfile({
-        restaurantName: formData.restaurantName,
-        cuisineType: formData.cuisineType,
-        address: formData.address,
-        city: formData.city,
-        state: formData.state,
-        zipCode: formData.zipCode,
-        phone: formData.phone,
-        capacity: formData.capacity ? parseInt(formData.capacity) : undefined,
-        description: formData.description || undefined,
-        website: formData.website || undefined,
-        openingHours,
-        photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
-        hasCompletedOnboarding: true,
-      });
-      
-      toast.success('Restaurant profile completed successfully!');
+      // Custom auth mode: Create account without Firebase
+      if (isCustomAuth && initialEmail && initialPassword) {
+        // Hash the password
+        const { hashPassword } = await import('../lib/password-utils');
+        const passwordHash = await hashPassword(initialPassword);
+
+        // Create restaurant account
+        // Build restaurant data object, excluding undefined values
+        const restaurantData: RestaurantData = {
+          restaurantName: formData.restaurantName,
+          cuisineType: formData.cuisineType,
+          address: formData.address,
+          city: formData.city,
+          state: formData.state,
+          zipCode: formData.zipCode,
+          phone: formData.phone,
+          openingHours,
+        };
+
+        // Only add optional fields if they have values
+        if (formData.capacity) {
+          restaurantData.capacity = parseInt(formData.capacity);
+        }
+        if (formData.description) {
+          restaurantData.description = formData.description;
+        }
+        if (formData.website) {
+          restaurantData.website = formData.website;
+        }
+
+        const result = await restaurantSearchService.createRestaurantAccount(
+          initialEmail,
+          passwordHash,
+          restaurantData
+        );
+
+        if (result.success && result.restaurantId && result.masterPassword) {
+          // Show the master password to the manager
+          toast.success(
+            `Account created! Your master password: ${result.masterPassword}`,
+            {
+              duration: 15000,
+              description: 'Save this password. You can use it to sign in and share it with hosts.',
+            }
+          );
+
+          toast.success('Restaurant profile completed successfully!');
+
+          // Call onComplete callback
+          if (onComplete) {
+            onComplete(result.restaurantId, {
+              restaurantName: formData.restaurantName,
+              email: initialEmail,
+            }, result.masterPassword);
+          }
+        } else {
+          toast.error(result.error || 'Failed to create account');
+        }
+      } else {
+        // Firebase mode: Update existing profile
+        // Upload image if one was selected
+        let uploadedImageUrl = formData.profileImageUrl;
+        if (selectedImageFile && user) {
+          try {
+            uploadedImageUrl = await uploadRestaurantProfileImage(user.uid, selectedImageFile);
+            toast.success('Profile image uploaded successfully!');
+          } catch (error) {
+            console.error('Error uploading image:', error);
+            toast.error('Failed to upload image, but continuing with setup');
+          }
+        }
+
+        await updateRestaurantProfile({
+          restaurantName: formData.restaurantName,
+          cuisineType: formData.cuisineType,
+          address: formData.address,
+          city: formData.city,
+          state: formData.state,
+          zipCode: formData.zipCode,
+          phone: formData.phone,
+          capacity: formData.capacity ? parseInt(formData.capacity) : undefined,
+          description: formData.description || undefined,
+          website: formData.website || undefined,
+          openingHours,
+          photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
+          hasCompletedOnboarding: true,
+        });
+
+        // Generate and save manager's master password
+        if (user && user.uid && user.email) {
+          const managerMasterPassword = restaurantSearchService.generateMasterPassword();
+          
+          // Save the master password to the restaurant profile
+          await restaurantSearchService.updateManagerMasterPassword(
+            user.uid,
+            user.email,
+            managerMasterPassword
+          );
+
+          // Show the master password to the manager
+          toast.success(
+            `Setup complete! Your master password: ${managerMasterPassword}`,
+            {
+              duration: 10000,
+              description: 'Save this password. You can use it to sign in and share it with hosts.',
+            }
+          );
+        }
+        
+        toast.success('Restaurant profile completed successfully!');
+      }
     } catch (error) {
       console.error('Error completing onboarding:', error);
       toast.error('Failed to complete setup. Please try again.');
@@ -201,11 +309,20 @@ export function RestaurantOnboarding() {
                 </div>
               </div>
 
-              <div className="flex justify-end pt-4">
+              <div className="flex justify-between pt-4">
+                {isCustomAuth && onCancel && (
+                  <Button
+                    onClick={onCancel}
+                    variant="outline"
+                    className="border-zinc-700 text-white hover:bg-zinc-900"
+                  >
+                    Cancel
+                  </Button>
+                )}
                 <Button
                   onClick={handleNext}
                   disabled={!isStep1Valid}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  className="bg-blue-600 hover:bg-blue-700 text-white ml-auto"
                 >
                   Continue
                 </Button>

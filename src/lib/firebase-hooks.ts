@@ -1,10 +1,10 @@
 /**
- * Custom React hooks for Firebase operations
- * These hooks integrate with the auth context and provide real-time data
+ * Firebase Hooks - React hooks for real-time Firestore data
+ * 
+ * These hooks provide convenient access to Firebase collections with real-time updates
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '../components/auth-provider';
+import { useState, useEffect } from 'react';
 import {
   guestService,
   tableService,
@@ -14,6 +14,8 @@ import {
   menuCategoryService,
   reservationService,
   takeoutOrderService,
+  conversationService,
+  conversationMessageService,
   type Guest,
   type Table,
   type Floor,
@@ -22,21 +24,9 @@ import {
   type MenuCategory,
   type Reservation,
   type TakeoutOrder,
+  type Conversation,
+  type ConversationMessage,
 } from './firebase-service';
-
-// Set restaurant ID in localStorage when auth context is available
-export function useRestaurantId() {
-  const { user, restaurantProfile } = useAuth();
-  
-  useEffect(() => {
-    if (user && restaurantProfile) {
-      // Use the user's UID as the restaurant ID
-      localStorage.setItem('currentRestaurantId', user.uid);
-    }
-  }, [user, restaurantProfile]);
-  
-  return user?.uid || 'demo-restaurant';
-}
 
 // ============================================================================
 // Guest Hooks
@@ -46,60 +36,55 @@ export function useGuests() {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  useRestaurantId(); // Ensure restaurant ID is set
-  
-  // Load guests on mount
-  useEffect(() => {
-    loadGuests();
-  }, []);
-  
-  const loadGuests = async () => {
-    try {
-      setLoading(true);
-      const data = await guestService.getAll();
-      setGuests(data);
-      setError(null);
-    } catch (err) {
-      setError('Failed to load guests');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Subscribe to real-time updates
+
   useEffect(() => {
     const unsubscribe = guestService.subscribe((data) => {
       setGuests(data);
       setLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
-  
-  const createGuest = useCallback(async (guestData: Omit<Guest, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
-    const guest = await guestService.create(guestData);
-    if (guest) {
-      // Real-time subscription will update the state
-      return guest;
+
+  const createGuest = async (guestData: Omit<Guest, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
+    try {
+      return await guestService.create(guestData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create guest');
+      return null;
     }
-    throw new Error('Failed to create guest');
-  }, []);
-  
-  const updateGuest = useCallback(async (id: string, updates: Partial<Guest>) => {
-    const success = await guestService.update(id, updates);
-    if (!success) {
-      throw new Error('Failed to update guest');
+  };
+
+  const updateGuest = async (id: string, updates: Partial<Guest>) => {
+    try {
+      return await guestService.update(id, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update guest');
+      return false;
     }
-  }, []);
-  
-  const deleteGuest = useCallback(async (id: string) => {
-    const success = await guestService.delete(id);
-    if (!success) {
-      throw new Error('Failed to delete guest');
+  };
+
+  const deleteGuest = async (id: string) => {
+    try {
+      return await guestService.delete(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete guest');
+      return false;
     }
-  }, []);
-  
+  };
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const data = await guestService.getAll();
+      setGuests(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch guests');
+      setLoading(false);
+    }
+  };
+
   return {
     guests,
     loading,
@@ -107,7 +92,7 @@ export function useGuests() {
     createGuest,
     updateGuest,
     deleteGuest,
-    refresh: loadGuests,
+    refresh,
   };
 }
 
@@ -119,59 +104,55 @@ export function useTables() {
   const [tables, setTables] = useState<Table[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  useRestaurantId();
-  
-  // Load tables on mount
-  useEffect(() => {
-    loadTables();
-  }, []);
-  
-  const loadTables = async () => {
-    try {
-      setLoading(true);
-      const data = await tableService.getAll();
-      setTables(data);
-      setError(null);
-    } catch (err) {
-      setError('Failed to load tables');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Subscribe to real-time updates
+
   useEffect(() => {
     const unsubscribe = tableService.subscribe((data) => {
       setTables(data);
       setLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
-  
-  const createTable = useCallback(async (tableData: Omit<Table, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
-    const table = await tableService.create(tableData);
-    if (table) {
-      return table;
+
+  const createTable = async (tableData: Omit<Table, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
+    try {
+      return await tableService.create(tableData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create table');
+      return null;
     }
-    throw new Error('Failed to create table');
-  }, []);
-  
-  const updateTable = useCallback(async (id: string, updates: Partial<Table>) => {
-    const success = await tableService.update(id, updates);
-    if (!success) {
-      throw new Error('Failed to update table');
+  };
+
+  const updateTable = async (id: string, updates: Partial<Table>) => {
+    try {
+      return await tableService.update(id, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update table');
+      return false;
     }
-  }, []);
-  
-  const deleteTable = useCallback(async (id: string) => {
-    const success = await tableService.delete(id);
-    if (!success) {
-      throw new Error('Failed to delete table');
+  };
+
+  const deleteTable = async (id: string) => {
+    try {
+      return await tableService.delete(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete table');
+      return false;
     }
-  }, []);
-  
+  };
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const data = await tableService.getAll();
+      setTables(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch tables');
+      setLoading(false);
+    }
+  };
+
   return {
     tables,
     loading,
@@ -179,7 +160,7 @@ export function useTables() {
     createTable,
     updateTable,
     deleteTable,
-    refresh: loadTables,
+    refresh,
   };
 }
 
@@ -191,59 +172,55 @@ export function useFloors() {
   const [floors, setFloors] = useState<Floor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  useRestaurantId();
-  
-  // Load floors on mount
-  useEffect(() => {
-    loadFloors();
-  }, []);
-  
-  const loadFloors = async () => {
-    try {
-      setLoading(true);
-      const data = await floorService.getAll();
-      setFloors(data);
-      setError(null);
-    } catch (err) {
-      setError('Failed to load floors');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Subscribe to real-time updates
+
   useEffect(() => {
     const unsubscribe = floorService.subscribe((data) => {
       setFloors(data);
       setLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
-  
-  const createFloor = useCallback(async (floorData: Omit<Floor, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
-    const floor = await floorService.create(floorData);
-    if (floor) {
-      return floor;
+
+  const createFloor = async (floorData: Omit<Floor, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
+    try {
+      return await floorService.create(floorData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create floor');
+      return null;
     }
-    throw new Error('Failed to create floor');
-  }, []);
-  
-  const updateFloor = useCallback(async (id: string, updates: Partial<Floor>) => {
-    const success = await floorService.update(id, updates);
-    if (!success) {
-      throw new Error('Failed to update floor');
+  };
+
+  const updateFloor = async (id: string, updates: Partial<Floor>) => {
+    try {
+      return await floorService.update(id, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update floor');
+      return false;
     }
-  }, []);
-  
-  const deleteFloor = useCallback(async (id: string) => {
-    const success = await floorService.delete(id);
-    if (!success) {
-      throw new Error('Failed to delete floor');
+  };
+
+  const deleteFloor = async (id: string) => {
+    try {
+      return await floorService.delete(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete floor');
+      return false;
     }
-  }, []);
-  
+  };
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const data = await floorService.getAll();
+      setFloors(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch floors');
+      setLoading(false);
+    }
+  };
+
   return {
     floors,
     loading,
@@ -251,7 +228,7 @@ export function useFloors() {
     createFloor,
     updateFloor,
     deleteFloor,
-    refresh: loadFloors,
+    refresh,
   };
 }
 
@@ -263,51 +240,43 @@ export function useMessages() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  useRestaurantId();
-  
-  // Load messages on mount
-  useEffect(() => {
-    loadMessages();
-  }, []);
-  
-  const loadMessages = async () => {
-    try {
-      setLoading(true);
-      const data = await messageService.getAll();
-      setMessages(data);
-      setError(null);
-    } catch (err) {
-      setError('Failed to load messages');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Subscribe to real-time updates
+
   useEffect(() => {
     const unsubscribe = messageService.subscribe((data) => {
       setMessages(data);
       setLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
-  
-  const sendMessage = useCallback(async (messageData: Omit<Message, 'id' | 'restaurantId'>) => {
-    const message = await messageService.create(messageData);
-    if (message) {
-      return message;
+
+  const createMessage = async (messageData: Omit<Message, 'id' | 'restaurantId'>) => {
+    try {
+      return await messageService.create(messageData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create message');
+      return null;
     }
-    throw new Error('Failed to send message');
-  }, []);
-  
+  };
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const data = await messageService.getAll();
+      setMessages(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch messages');
+      setLoading(false);
+    }
+  };
+
   return {
     messages,
     loading,
     error,
-    sendMessage,
-    refresh: loadMessages,
+    createMessage,
+    refresh,
   };
 }
 
@@ -319,59 +288,55 @@ export function useMenuItems() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  useRestaurantId();
-  
-  // Load menu items on mount
-  useEffect(() => {
-    loadMenuItems();
-  }, []);
-  
-  const loadMenuItems = async () => {
-    try {
-      setLoading(true);
-      const data = await menuItemService.getAll();
-      setMenuItems(data);
-      setError(null);
-    } catch (err) {
-      setError('Failed to load menu items');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Subscribe to real-time updates
+
   useEffect(() => {
     const unsubscribe = menuItemService.subscribe((data) => {
       setMenuItems(data);
       setLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
-  
-  const createMenuItem = useCallback(async (itemData: Omit<MenuItem, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
-    const item = await menuItemService.create(itemData);
-    if (item) {
-      return item;
+
+  const createMenuItem = async (itemData: Omit<MenuItem, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
+    try {
+      return await menuItemService.create(itemData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create menu item');
+      return null;
     }
-    throw new Error('Failed to create menu item');
-  }, []);
-  
-  const updateMenuItem = useCallback(async (id: string, updates: Partial<MenuItem>) => {
-    const success = await menuItemService.update(id, updates);
-    if (!success) {
-      throw new Error('Failed to update menu item');
+  };
+
+  const updateMenuItem = async (id: string, updates: Partial<MenuItem>) => {
+    try {
+      return await menuItemService.update(id, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update menu item');
+      return false;
     }
-  }, []);
-  
-  const deleteMenuItem = useCallback(async (id: string) => {
-    const success = await menuItemService.delete(id);
-    if (!success) {
-      throw new Error('Failed to delete menu item');
+  };
+
+  const deleteMenuItem = async (id: string) => {
+    try {
+      return await menuItemService.delete(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete menu item');
+      return false;
     }
-  }, []);
-  
+  };
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const data = await menuItemService.getAll();
+      setMenuItems(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch menu items');
+      setLoading(false);
+    }
+  };
+
   return {
     menuItems,
     loading,
@@ -379,7 +344,7 @@ export function useMenuItems() {
     createMenuItem,
     updateMenuItem,
     deleteMenuItem,
-    refresh: loadMenuItems,
+    refresh,
   };
 }
 
@@ -388,70 +353,66 @@ export function useMenuItems() {
 // ============================================================================
 
 export function useMenuCategories() {
-  const [categories, setCategories] = useState<MenuCategory[]>([]);
+  const [menuCategories, setMenuCategories] = useState<MenuCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  useRestaurantId();
-  
-  // Load categories on mount
+
   useEffect(() => {
-    loadCategories();
+    const unsubscribe = menuCategoryService.subscribe((data) => {
+      setMenuCategories(data);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
-  
-  const loadCategories = async () => {
+
+  const createMenuCategory = async (categoryData: Omit<MenuCategory, 'id' | 'createdAt' | 'restaurantId'>) => {
+    try {
+      return await menuCategoryService.create(categoryData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create menu category');
+      return null;
+    }
+  };
+
+  const updateMenuCategory = async (id: string, updates: Partial<MenuCategory>) => {
+    try {
+      return await menuCategoryService.update(id, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update menu category');
+      return false;
+    }
+  };
+
+  const deleteMenuCategory = async (id: string) => {
+    try {
+      return await menuCategoryService.delete(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete menu category');
+      return false;
+    }
+  };
+
+  const refresh = async () => {
     try {
       setLoading(true);
       const data = await menuCategoryService.getAll();
-      setCategories(data);
-      setError(null);
+      setMenuCategories(data);
+      setLoading(false);
     } catch (err) {
-      setError('Failed to load categories');
-      console.error(err);
-    } finally {
+      setError(err instanceof Error ? err.message : 'Failed to fetch menu categories');
       setLoading(false);
     }
   };
-  
-  // Subscribe to real-time updates
-  useEffect(() => {
-    const unsubscribe = menuCategoryService.subscribe((data) => {
-      setCategories(data);
-      setLoading(false);
-    });
-    
-    return () => unsubscribe();
-  }, []);
-  
-  const createCategory = useCallback(async (categoryData: Omit<MenuCategory, 'id' | 'createdAt' | 'restaurantId'>) => {
-    const category = await menuCategoryService.create(categoryData);
-    if (category) {
-      return category;
-    }
-    throw new Error('Failed to create category');
-  }, []);
-  
-  const updateCategory = useCallback(async (id: string, updates: Partial<MenuCategory>) => {
-    const success = await menuCategoryService.update(id, updates);
-    if (!success) {
-      throw new Error('Failed to update category');
-    }
-  }, []);
-  
-  const deleteCategory = useCallback(async (id: string) => {
-    const success = await menuCategoryService.delete(id);
-    if (!success) {
-      throw new Error('Failed to delete category');
-    }
-  }, []);
-  
+
   return {
-    categories,
+    menuCategories,
     loading,
     error,
-    createCategory,
-    updateCategory,
-    deleteCategory,
-    refresh: loadCategories,
+    createMenuCategory,
+    updateMenuCategory,
+    deleteMenuCategory,
+    refresh,
   };
 }
 
@@ -463,59 +424,55 @@ export function useReservations() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  useRestaurantId();
-  
-  // Load reservations on mount
-  useEffect(() => {
-    loadReservations();
-  }, []);
-  
-  const loadReservations = async () => {
-    try {
-      setLoading(true);
-      const data = await reservationService.getAll();
-      setReservations(data);
-      setError(null);
-    } catch (err) {
-      setError('Failed to load reservations');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Subscribe to real-time updates
+
   useEffect(() => {
     const unsubscribe = reservationService.subscribe((data) => {
       setReservations(data);
       setLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
-  
-  const createReservation = useCallback(async (reservationData: Omit<Reservation, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
-    const reservation = await reservationService.create(reservationData);
-    if (reservation) {
-      return reservation;
+
+  const createReservation = async (reservationData: Omit<Reservation, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
+    try {
+      return await reservationService.create(reservationData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create reservation');
+      return null;
     }
-    throw new Error('Failed to create reservation');
-  }, []);
-  
-  const updateReservation = useCallback(async (id: string, updates: Partial<Reservation>) => {
-    const success = await reservationService.update(id, updates);
-    if (!success) {
-      throw new Error('Failed to update reservation');
+  };
+
+  const updateReservation = async (id: string, updates: Partial<Reservation>) => {
+    try {
+      return await reservationService.update(id, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update reservation');
+      return false;
     }
-  }, []);
-  
-  const deleteReservation = useCallback(async (id: string) => {
-    const success = await reservationService.delete(id);
-    if (!success) {
-      throw new Error('Failed to delete reservation');
+  };
+
+  const deleteReservation = async (id: string) => {
+    try {
+      return await reservationService.delete(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete reservation');
+      return false;
     }
-  }, []);
-  
+  };
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const data = await reservationService.getAll();
+      setReservations(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch reservations');
+      setLoading(false);
+    }
+  };
+
   return {
     reservations,
     loading,
@@ -523,7 +480,7 @@ export function useReservations() {
     createReservation,
     updateReservation,
     deleteReservation,
-    refresh: loadReservations,
+    refresh,
   };
 }
 
@@ -535,59 +492,55 @@ export function useTakeoutOrders() {
   const [takeoutOrders, setTakeoutOrders] = useState<TakeoutOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  useRestaurantId();
-  
-  // Load takeout orders on mount
-  useEffect(() => {
-    loadTakeoutOrders();
-  }, []);
-  
-  const loadTakeoutOrders = async () => {
-    try {
-      setLoading(true);
-      const data = await takeoutOrderService.getAll();
-      setTakeoutOrders(data);
-      setError(null);
-    } catch (err) {
-      setError('Failed to load takeout orders');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  // Subscribe to real-time updates
+
   useEffect(() => {
     const unsubscribe = takeoutOrderService.subscribe((data) => {
       setTakeoutOrders(data);
       setLoading(false);
     });
-    
+
     return () => unsubscribe();
   }, []);
-  
-  const createTakeoutOrder = useCallback(async (orderData: Omit<TakeoutOrder, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
-    const order = await takeoutOrderService.create(orderData);
-    if (order) {
-      return order;
+
+  const createTakeoutOrder = async (orderData: Omit<TakeoutOrder, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
+    try {
+      return await takeoutOrderService.create(orderData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create takeout order');
+      return null;
     }
-    throw new Error('Failed to create takeout order');
-  }, []);
-  
-  const updateTakeoutOrder = useCallback(async (id: string, updates: Partial<TakeoutOrder>) => {
-    const success = await takeoutOrderService.update(id, updates);
-    if (!success) {
-      throw new Error('Failed to update takeout order');
+  };
+
+  const updateTakeoutOrder = async (id: string, updates: Partial<TakeoutOrder>) => {
+    try {
+      return await takeoutOrderService.update(id, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update takeout order');
+      return false;
     }
-  }, []);
-  
-  const deleteTakeoutOrder = useCallback(async (id: string) => {
-    const success = await takeoutOrderService.delete(id);
-    if (!success) {
-      throw new Error('Failed to delete takeout order');
+  };
+
+  const deleteTakeoutOrder = async (id: string) => {
+    try {
+      return await takeoutOrderService.delete(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete takeout order');
+      return false;
     }
-  }, []);
-  
+  };
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const data = await takeoutOrderService.getAll();
+      setTakeoutOrders(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch takeout orders');
+      setLoading(false);
+    }
+  };
+
   return {
     takeoutOrders,
     loading,
@@ -595,6 +548,168 @@ export function useTakeoutOrders() {
     createTakeoutOrder,
     updateTakeoutOrder,
     deleteTakeoutOrder,
-    refresh: loadTakeoutOrders,
+    refresh,
+  };
+}
+
+// ============================================================================
+// Conversation Hooks
+// ============================================================================
+
+export function useConversations() {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = conversationService.subscribe((data) => {
+      setConversations(data);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const createConversation = async (conversationData: Omit<Conversation, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
+    try {
+      return await conversationService.create(conversationData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create conversation');
+      return null;
+    }
+  };
+
+  const updateConversation = async (id: string, updates: Partial<Conversation>) => {
+    try {
+      return await conversationService.update(id, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update conversation');
+      return false;
+    }
+  };
+
+  const deleteConversation = async (id: string) => {
+    try {
+      return await conversationService.delete(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete conversation');
+      return false;
+    }
+  };
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const data = await conversationService.getAll();
+      setConversations(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch conversations');
+      setLoading(false);
+    }
+  };
+
+  return {
+    conversations,
+    loading,
+    error,
+    createConversation,
+    updateConversation,
+    deleteConversation,
+    refresh,
+  };
+}
+
+// ============================================================================
+// Conversation Messages Hook (Subcollection)
+// ============================================================================
+
+export function useConversationMessages(conversationId: string | null) {
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!conversationId) {
+      setMessages([]);
+      setLoading(false);
+      return;
+    }
+
+    const unsubscribe = conversationMessageService.subscribeToConversation(conversationId, (data) => {
+      setMessages(data);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [conversationId]);
+
+  const createMessage = async (messageData: Omit<ConversationMessage, 'id'>) => {
+    if (!conversationId) {
+      setError('No conversation selected');
+      return null;
+    }
+
+    try {
+      return await conversationMessageService.create(conversationId, messageData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create message');
+      return null;
+    }
+  };
+
+  const updateMessage = async (messageId: string, updates: Partial<ConversationMessage>) => {
+    if (!conversationId) {
+      setError('No conversation selected');
+      return false;
+    }
+
+    try {
+      return await conversationMessageService.update(conversationId, messageId, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update message');
+      return false;
+    }
+  };
+
+  const deleteMessage = async (messageId: string) => {
+    if (!conversationId) {
+      setError('No conversation selected');
+      return false;
+    }
+
+    try {
+      return await conversationMessageService.delete(conversationId, messageId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete message');
+      return false;
+    }
+  };
+
+  const refresh = async () => {
+    if (!conversationId) {
+      setMessages([]);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const data = await conversationMessageService.getAllForConversation(conversationId);
+      setMessages(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch messages');
+      setLoading(false);
+    }
+  };
+
+  return {
+    messages,
+    loading,
+    error,
+    createMessage,
+    updateMessage,
+    deleteMessage,
+    refresh,
   };
 }

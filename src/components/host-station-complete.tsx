@@ -16,7 +16,11 @@ import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import { Separator } from './ui/separator';
 import { toast } from 'sonner';
-import { useGuests, useTables, useMessages, useFloors } from '../lib/firebase-hooks';
+import { useGuests, useTables, useMessages, useFloors, useReservations } from '../lib/firebase-hooks';
+import { useAuth } from './auth-provider';
+import { MessagingInbox } from './messaging-inbox';
+import { MessagingChat } from './messaging-chat';
+import type { Conversation } from '../lib/firebase-service';
 import {
   LayoutDashboard,
   List,
@@ -72,19 +76,8 @@ interface Table {
   section: string;
   position: { x: number; y: number };
   currentGuest?: string;
-  shape: 'round' | 'square' | 'rectangle';
+  shape: 'round' | 'square' | 'rectangle' | 'rectangular' | 'diamond' | 'oval' | 'hexagon' | 'booth' | 'bar' | 'banquet' | 'semicircle' | 'triangle' | 'octagon' | 'communal' | 'high-top' | 'booth-curved' | 'u-shape' | 'l-shape';
   floor: 'ground' | 'main' | 'upper' | 'rooftop';
-}
-
-interface Message {
-  id: string;
-  guestId: string;
-  guestName: string;
-  phone: string;
-  message: string;
-  timestamp: string;
-  sent: boolean;
-  template?: string;
 }
 
 // Mock Data Generators
@@ -348,7 +341,102 @@ function DroppableTable({ table, currentGuest, onDrop, onClick }: DroppableTable
     round: 'rounded-full',
     square: 'rounded-2xl',
     rectangle: 'rounded-2xl',
+    rectangular: 'rounded-2xl',
+    diamond: 'rounded-2xl',
+    oval: 'rounded-full',
+    hexagon: 'rounded-2xl',
+    booth: 'rounded-3xl',
+    bar: 'rounded-xl',
+    banquet: 'rounded-2xl',
+    semicircle: 'rounded-t-full rounded-b-md',
+    triangle: 'rounded-2xl',
+    octagon: 'rounded-3xl',
+    communal: 'rounded-2xl',
+    'high-top': 'rounded-2xl',
+    'booth-curved': 'rounded-[2rem]',
+    'u-shape': 'rounded-2xl',
+    'l-shape': 'rounded-2xl',
   };
+
+  const sizeMap = {
+    2: { width: 70, height: 70 },
+    4: { width: 90, height: 90 },
+    6: { width: 130, height: 90 },
+    8: { width: 150, height: 100 },
+  };
+
+  // Adjust size based on shape
+  let size = sizeMap[table.capacity as keyof typeof sizeMap] || sizeMap[4];
+
+  // Special sizing for specific shapes
+  if (table.shape === 'rectangular' || table.shape === 'rectangle') {
+    size = {
+      width: size.width * 1.5,
+      height: size.height * 0.8,
+    }; // Long rectangular
+  } else if (table.shape === 'oval') {
+    size = {
+      width: size.width * 1.3,
+      height: size.height * 0.9,
+    }; // Elongated oval
+  } else if (table.shape === 'diamond') {
+    size = {
+      width: size.width * 1.1,
+      height: size.height * 1.1,
+    }; // Slightly larger diamond
+  } else if (table.shape === 'hexagon') {
+    size = {
+      width: size.width * 1.2,
+      height: size.height * 1.1,
+    }; // Hexagonal shape
+  } else if (table.shape === 'booth') {
+    size = {
+      width: size.width * 1.3,
+      height: size.height * 1.2,
+    }; // Wider and taller
+  } else if (table.shape === 'bar') {
+    size = {
+      width: size.width * 1.8,
+      height: size.height * 0.6,
+    }; // Very wide, narrow
+  } else if (table.shape === 'banquet') {
+    size = { width: size.width * 2, height: size.height * 0.8 }; // Long rectangular
+  } else if (table.shape === 'semicircle') {
+    size = {
+      width: size.width * 1.2,
+      height: size.height * 0.8,
+    }; // Wider, shorter
+  } else if (table.shape === 'triangle') {
+    size = {
+      width: size.width * 1.1,
+      height: size.height * 1.1,
+    }; // Slightly larger
+  } else if (table.shape === 'communal') {
+    size = {
+      width: size.width * 2.5,
+      height: size.height * 1.2,
+    }; // Very long, wider
+  } else if (table.shape === 'high-top') {
+    size = {
+      width: size.width * 0.8,
+      height: size.height * 0.8,
+    }; // Smaller
+  } else if (table.shape === 'booth-curved') {
+    size = {
+      width: size.width * 1.4,
+      height: size.height * 1.3,
+    }; // Curved booth
+  } else if (table.shape === 'u-shape') {
+    size = {
+      width: size.width * 1.6,
+      height: size.height * 1.4,
+    }; // U-shaped
+  } else if (table.shape === 'l-shape') {
+    size = {
+      width: size.width * 1.5,
+      height: size.height * 1.3,
+    }; // L-shaped
+  }
 
   const currentStyle = statusStyles[table.status];
   const isDropTarget = isOver && canDrop;
@@ -370,8 +458,8 @@ function DroppableTable({ table, currentGuest, onDrop, onClick }: DroppableTable
             style={{
               left: `${table.position.x}px`,
               top: `${table.position.y}px`,
-              width: table.shape === 'rectangle' ? '120px' : '90px',
-              height: '90px',
+              width: `${size.width}px`,
+              height: `${size.height}px`,
             }}
             onClick={onClick}
           >
@@ -532,12 +620,10 @@ function DroppableSection({ status, title, icon, guests, onDrop, onGuestClick }:
 export default function HostStationComplete({ isDemo = false }: { isDemo?: boolean }) {
   const [guests, setGuests] = useState<Guest[]>([]);
   const [tables, setTables] = useState<Table[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [selectedGuest, setSelectedGuest] = useState<Guest | null>(null);
   const [showTableModal, setShowTableModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
-  const [messageText, setMessageText] = useState('');
   const [selectedTemplate, setSelectedTemplate] = useState('');
   const [showMessagePreview, setShowMessagePreview] = useState(false);
   const [previewGuest, setPreviewGuest] = useState<Guest | null>(null);
@@ -545,7 +631,6 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [guestToRemove, setGuestToRemove] = useState<Guest | null>(null);
   const [showGuestSelector, setShowGuestSelector] = useState(false);
-  const [messagingGuest, setMessagingGuest] = useState<Guest | null>(null);
   const [restaurantInfo, setRestaurantInfo] = useState({
     name: 'Bella Vista',
     phone: '(555) 123-4567',
@@ -554,8 +639,12 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
     hours: 'Mon-Sun: 5:00 PM - 11:00 PM',
   });
   
+  // Messaging state
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  
   // Floor Plan State
-  const [selectedFloor, setSelectedFloor] = useState<'ground' | 'main' | 'upper' | 'rooftop'>('main');
+  const [floors, setFloors] = useState<import('../lib/firebase-service').Floor[]>([]);
+  const [selectedFloor, setSelectedFloor] = useState<import('../lib/firebase-service').Floor | null>(null);
   const [showOnlyAvailable, setShowOnlyAvailable] = useState(false);
   const [tableSearchQuery, setTableSearchQuery] = useState('');
   const [showTableDetails, setShowTableDetails] = useState(false);
@@ -565,10 +654,24 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
   const [tableToSeat, setTableToSeat] = useState<Table | null>(null);
 
   // Firebase integration
+  const { user, selectedRestaurantId } = useAuth();
   const firebaseGuests = useGuests();
   const firebaseTables = useTables();
   const firebaseMessages = useMessages();
   const firebaseFloors = useFloors();
+  const firebaseReservations = useReservations();
+  // Future use: menu items, categories, and takeout orders
+
+  // Set restaurant ID in localStorage for messaging and other services
+  useEffect(() => {
+    const restaurantId = selectedRestaurantId || user?.uid;
+    if (restaurantId) {
+      localStorage.setItem('currentRestaurantId', restaurantId);
+    }
+  }, [selectedRestaurantId, user]);
+  // const firebaseMenuItems = useMenuItems();
+  // const firebaseMenuCategories = useMenuCategories();
+  // const firebaseTakeoutOrders = useTakeoutOrders();
 
   // Helper function to convert Firebase Guest to component Guest type
   const convertFirebaseGuest = (fbGuest: typeof firebaseGuests.guests[0]): Guest => {
@@ -596,6 +699,33 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
       source: fbGuest.source,
       waitTime: fbGuest.waitTime,
       notified: fbGuest.notified,
+    };
+  };
+
+  // Helper function to convert Firebase Reservation to component Guest type
+  const convertFirebaseReservation = (fbReservation: typeof firebaseReservations.reservations[0]): Guest => {
+    // Map Firebase reservation status to component status
+    const statusMap: Record<string, Guest['status']> = {
+      'waiting': 'waiting',
+      'seated': 'seated',
+      'completed': 'completed',
+      'cancelled': 'waiting',
+    };
+
+    return {
+      id: `res-${fbReservation.id}`,
+      name: fbReservation.guestName,
+      phone: fbReservation.phone,
+      email: fbReservation.email || '',
+      partySize: fbReservation.partySize,
+      status: statusMap[fbReservation.status] || 'reserved',
+      tableNumber: fbReservation.tableId ? parseInt(fbReservation.tableId) : undefined,
+      arrivalTime: fbReservation.createdAt,
+      reservationTime: fbReservation.time,
+      specialRequests: fbReservation.notes,
+      source: 'online',
+      waitTime: undefined,
+      notified: false,
     };
   };
 
@@ -633,24 +763,52 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
     if (isDemo) {
       // Demo mode - use mock data
       setGuests(generateMockGuests());
-    } else if (!firebaseGuests.loading) {
-      // Realtime mode - use Firebase data (empty array if no data)
+    } else if (!firebaseGuests.loading && !firebaseReservations.loading) {
+      // Realtime mode - merge guests and reservations
+      const allGuests: Guest[] = [];
+      
+      // Add guests from guests collection
       if (firebaseGuests.guests.length > 0) {
         const convertedGuests = firebaseGuests.guests.map(convertFirebaseGuest);
-        setGuests(convertedGuests);
-      } else {
-        setGuests([]);
+        allGuests.push(...convertedGuests);
       }
+      
+      // Add reservations from reservations collection
+      if (firebaseReservations.reservations.length > 0) {
+        const convertedReservations = firebaseReservations.reservations.map(convertFirebaseReservation);
+        allGuests.push(...convertedReservations);
+      }
+      
+      setGuests(allGuests);
     }
-  }, [firebaseGuests.guests, firebaseGuests.loading, isDemo]);
+  }, [firebaseGuests.guests, firebaseGuests.loading, firebaseReservations.reservations, firebaseReservations.loading, isDemo]);
 
+  // Load floors from Firebase
   useEffect(() => {
     if (isDemo) {
       // Demo mode - use mock data
       setTables(generateMockTables());
+      setFloors([]);
+      setSelectedFloor(null);
     } else if (!firebaseFloors.loading) {
-      // Realtime mode - extract tables from floors
+      // Realtime mode - use Firebase floors
       if (firebaseFloors.floors.length > 0) {
+        setFloors(firebaseFloors.floors);
+        
+        // Preserve the currently selected floor if it still exists, otherwise select first floor
+        if (selectedFloor) {
+          const updatedSelectedFloor = firebaseFloors.floors.find(f => f.id === selectedFloor.id);
+          if (updatedSelectedFloor) {
+            setSelectedFloor(updatedSelectedFloor);
+          } else {
+            // Selected floor was deleted, fall back to first floor
+            setSelectedFloor(firebaseFloors.floors[0]);
+          }
+        } else {
+          // No floor selected yet, select first floor
+          setSelectedFloor(firebaseFloors.floors[0]);
+        }
+        
         // Flatten all tables from all floors
         const allTables: Table[] = [];
         firebaseFloors.floors.forEach(floor => {
@@ -662,20 +820,13 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
         });
         setTables(allTables);
       } else {
+        // No floors in Firebase
+        setFloors([]);
+        setSelectedFloor(null);
         setTables([]);
       }
     }
   }, [firebaseFloors.floors, firebaseFloors.loading, isDemo]);
-
-  useEffect(() => {
-    if (isDemo) {
-      // Demo mode - no messages
-      setMessages([]);
-    } else if (!firebaseMessages.loading) {
-      // Realtime mode - use Firebase data (empty array if no data)
-      setMessages(firebaseMessages.messages);
-    }
-  }, [firebaseMessages.messages, firebaseMessages.loading, isDemo]);
 
   const handleDrop = (guestId: string, newStatus: Guest['status']) => {
     setGuests(guests.map(g => {
@@ -824,7 +975,7 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
   // Firebase: Send message to guest
   const handleFirebaseSendMessage = async (guest: Guest, message: string) => {
     try {
-      await firebaseMessages.sendMessage({
+      await firebaseMessages.createMessage({
         guestId: guest.id,
         guestName: guest.name,
         phone: guest.phone,
@@ -834,7 +985,6 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
         template: selectedTemplate || undefined,
       });
       
-      setMessageText('');
       setSelectedTemplate('');
       toast.success('Message sent to ' + guest.name);
     } catch (error) {
@@ -857,8 +1007,10 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
   const waitlistGuests = guests.filter(g => g.status === 'waiting');
   const reservedGuests = guests.filter(g => g.status === 'reserved');
   
-  // Floor Plan Filtering
-  const floorTables = tables.filter(t => t.floor === selectedFloor);
+  // Floor Plan Filtering - use actual floor data from selectedFloor
+  const floorTables = selectedFloor && selectedFloor.layout ? 
+    selectedFloor.layout.map(fbTable => convertFirebaseTable(fbTable, selectedFloor.name)) : 
+    [];
   const filteredFloorTables = floorTables.filter(t => {
     const matchesSearch = tableSearchQuery === '' || 
                          t.number.toString().includes(tableSearchQuery) ||
@@ -1165,15 +1317,22 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
                           <LayoutGrid className="w-5 h-5 text-blue-400" />
                           Floor Plan
                         </h3>
-                        <Select value={selectedFloor} onValueChange={(value) => setSelectedFloor(value as 'ground' | 'main' | 'upper' | 'rooftop')}>
+                        <Select 
+                          value={selectedFloor?.id || ''} 
+                          onValueChange={(value) => {
+                            const floor = floors.find(f => f.id === value);
+                            if (floor) setSelectedFloor(floor);
+                          }}
+                        >
                           <SelectTrigger className="w-[180px] bg-slate-700 border-slate-600 text-slate-100">
-                            <SelectValue />
+                            <SelectValue placeholder="Select floor" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="ground">Ground Floor</SelectItem>
-                            <SelectItem value="main">Main Floor</SelectItem>
-                            <SelectItem value="upper">Upper Floor</SelectItem>
-                            <SelectItem value="rooftop">Rooftop</SelectItem>
+                            {floors.map(floor => (
+                              <SelectItem key={floor.id} value={floor.id}>
+                                {floor.name}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -1303,174 +1462,20 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
               </div>
             </TabsContent>
 
-            {/* Messaging Tab */}
-            <TabsContent value="messaging" className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Send New Message */}
-                <Card className="p-6 bg-slate-800 border-slate-700">
-                  <h3 className="text-xl text-slate-100 mb-4 flex items-center gap-2">
-                    <Send className="w-5 h-5 text-blue-400" />
-                    Send Message
-                  </h3>
-
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label className="text-slate-200">Select Guest</Label>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full justify-between bg-slate-700 border-slate-600 text-slate-100 hover:bg-slate-600"
-                        onClick={() => setShowGuestSelector(true)}
-                      >
-                        <span>
-                          {messagingGuest 
-                            ? `${messagingGuest.name} - ${messagingGuest.partySize} guests` 
-                            : 'Choose a guest...'}
-                        </span>
-                        <User className="w-4 h-4 ml-2 text-slate-400" />
-                      </Button>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-slate-200">Message Template</Label>
-                      <Select value={selectedTemplate} onValueChange={setSelectedTemplate}>
-                        <SelectTrigger className="bg-slate-700 border-slate-600 text-slate-100">
-                          <SelectValue placeholder="Choose a template..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="tableReady">Table Ready</SelectItem>
-                          <SelectItem value="running15">Running 15 min late</SelectItem>
-                          <SelectItem value="running30">Running 30 min late</SelectItem>
-                          <SelectItem value="confirmation">Confirmation</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-slate-200">Custom Message</Label>
-                      <Textarea
-                        placeholder="Or type a custom message..."
-                        value={messageText}
-                        onChange={(e) => setMessageText(e.target.value)}
-                        className="bg-slate-700 border-slate-600 text-slate-100 min-h-32"
-                      />
-                    </div>
-
-                    <Button
-                      className="w-full bg-blue-600 hover:bg-blue-700"
-                      disabled={!messagingGuest}
-                      onClick={() => {
-                        if (messagingGuest) {
-                          handleOpenMessagePreview(messagingGuest.id, messageText || undefined);
-                        }
-                      }}
-                    >
-                      <Send className="w-4 h-4 mr-2" />
-                      Send Message
-                    </Button>
-                  </div>
-                </Card>
-
-                {/* Message History */}
-                <Card className="p-6 bg-slate-800 border-slate-700">
-                  <h3 className="text-xl text-slate-100 mb-4 flex items-center gap-2">
-                    <MessageSquare className="w-5 h-5 text-cyan-400" />
-                    Message History
-                  </h3>
-
-                  <ScrollArea className="h-[500px]">
-                    <div className="space-y-3 pr-4">
-                      {messages.length === 0 ? (
-                        <div className="text-center py-12 text-slate-500">
-                          <MessageSquare className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                          <p>No messages sent yet</p>
-                        </div>
-                      ) : (
-                        messages.map((msg) => (
-                          <div
-                            key={msg.id}
-                            className="p-4 bg-slate-700/50 rounded-lg border border-slate-600 cursor-pointer hover:bg-slate-700 hover:border-blue-500 transition-all"
-                            onClick={() => {
-                              // Find the guest from the message
-                              const guest = guests.find(g => g.id === msg.guestId);
-                              if (guest) {
-                                setMessagingGuest(guest);
-                                setMessageText(msg.message);
-                                // Scroll to the message form
-                                window.scrollTo({ top: 0, behavior: 'smooth' });
-                              }
-                            }}
-                          >
-                            <div className="flex items-start justify-between mb-2">
-                              <div>
-                                <div className="text-slate-100">{msg.guestName}</div>
-                                <div className="text-sm text-slate-400">{msg.phone}</div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <CheckCircle2 className="w-4 h-4 text-green-400" />
-                                <span className="text-xs text-slate-400">
-                                  {new Date(msg.timestamp).toLocaleTimeString('en-US', {
-                                    hour: 'numeric',
-                                    minute: '2-digit',
-                                  })}
-                                </span>
-                              </div>
-                            </div>
-                            <p className="text-sm text-slate-300">{msg.message}</p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </Card>
-              </div>
-
-              {/* Quick Actions for Waitlist */}
-              <Card className="p-6 bg-slate-800 border-slate-700">
-                <h3 className="text-xl text-slate-100 mb-4">Quick Notify - Waitlist</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {waitlistGuests.slice(0, 6).map((guest) => (
-                    <div
-                      key={guest.id}
-                      className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg"
-                    >
-                      <div className="flex-1">
-                        <div className="text-slate-100 text-sm">{guest.name}</div>
-                        <div className="text-xs text-slate-400">
-                          {guest.partySize} guests • {guest.waitTime}m
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant={guest.notified ? 'secondary' : 'default'}
-                          onClick={() => handleOpenMessagePreview(guest.id)}
-                          className={guest.notified ? '' : 'bg-blue-600 hover:bg-blue-700'}
-                        >
-                          {guest.notified ? (
-                            <>
-                              <Check className="w-3 h-3 mr-1" />
-                              Sent
-                            </>
-                          ) : (
-                            <>
-                              <Send className="w-3 h-3 mr-1" />
-                              Notify
-                            </>
-                          )}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => handleRemoveFromQueue(guest)}
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
+            {/* Messaging Tab - General Messaging */}
+            <TabsContent value="messaging" className="h-[calc(100vh-200px)]">
+              {selectedConversation ? (
+                <MessagingChat
+                  conversation={selectedConversation}
+                  userRole="RESTAURANT_HOST"
+                  onBack={() => setSelectedConversation(null)}
+                />
+              ) : (
+                <MessagingInbox
+                  onSelectConversation={(conversation) => setSelectedConversation(conversation)}
+                  userRole="RESTAURANT_HOST"
+                />
+              )}
             </TabsContent>
 
             {/* Settings Tab */}
@@ -1855,7 +1860,7 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
                     <div
                       key={guest.id}
                       onClick={() => {
-                        setMessagingGuest(guest);
+                        setSelectedGuest(guest);
                         setShowGuestSelector(false);
                       }}
                       className="p-4 rounded-lg border bg-slate-700/50 border-slate-600 hover:border-blue-500 hover:bg-slate-700 cursor-pointer transition-all"

@@ -7,6 +7,9 @@ import { Label } from './components/ui/label';
 import { Toaster } from './components/ui/sonner';
 import { AuthProvider, useAuth } from './components/auth-provider';
 import { RestaurantOnboarding } from './components/restaurant-onboarding';
+import { RestaurantSearchModal } from './components/RestaurantSearchModal';
+import { HostSignIn } from './components/HostSignIn';
+import type { RestaurantSearchResult } from './lib/firebase-service';
 import HostSection from './components/host-station-complete';
 import { ManagerApp } from './components/manager-app';
 import { 
@@ -18,7 +21,8 @@ import {
   Mail,
   LogOut,
   Crown,
-  User
+  User,
+  Building2
 } from 'lucide-react';
 
 type UserRole = 'host' | 'manager' | null;
@@ -28,23 +32,39 @@ interface UserAccount {
   password: string;
   role: UserRole;
   name: string;
+  restaurantId?: string;
+  restaurantData?: Partial<RestaurantData>;
 }
 
-// Demo accounts for testing
-const demoAccounts: UserAccount[] = [
-  { email: 'host@demo.com', password: 'demo123', role: 'host', name: 'Sarah Johnson' },
-  { email: 'manager@demo.com', password: 'demo123', role: 'manager', name: 'Michael Chen' },
-];
+interface RestaurantData {
+  restaurantName: string;
+  cuisineType: string;
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  phone: string;
+}
 
 function AppContent() {
-  const { user: firebaseUser, restaurantProfile, loading: firebaseLoading, signInWithGoogle, signInWithEmail, signUpWithEmail, logout: firebaseLogout } = useAuth();
+  const { 
+    user: firebaseUser, 
+    restaurantProfile, 
+    loading: firebaseLoading, 
+    signInWithGoogle, 
+    signInWithEmail, 
+    logout: firebaseLogout,
+    userRole: detectedUserRole,
+    selectedRestaurantId,
+    setSelectedRestaurantId
+  } = useAuth();
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSignInLoading, setIsSignInLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [authView, setAuthView] = useState<'initial' | 'signin' | 'signup'>('initial');
+  const [authView, setAuthView] = useState<'initial' | 'signin' | 'signup' | 'hostsignin'>('initial');
   
   // Sign up form states
   const [signupName, setSignupName] = useState('');
@@ -53,6 +73,28 @@ function AppContent() {
   const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
   const [isSignupLoading, setIsSignupLoading] = useState(false);
 
+  // Onboarding states for custom auth
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingEmail, setOnboardingEmail] = useState('');
+  const [onboardingPassword, setOnboardingPassword] = useState('');
+
+  // Manager view switcher state
+  const [managerCurrentView, setManagerCurrentView] = useState<'manager' | 'host'>('manager');
+  
+  // Restaurant search modal for hosts
+  const [showRestaurantSearch, setShowRestaurantSearch] = useState(false);
+  
+  // Host sign in with master password
+  const [, setHostCredentials] = useState<{ restaurantId: string; email: string; name: string } | null>(null);
+  
+  // Sync restaurant ID to localStorage for messaging and other services
+  React.useEffect(() => {
+    const restaurantId = selectedRestaurantId || firebaseUser?.uid;
+    if (restaurantId) {
+      localStorage.setItem('currentRestaurantId', restaurantId);
+    }
+  }, [selectedRestaurantId, firebaseUser]);
+  
   // Show loading spinner for Firebase
   if (firebaseLoading) {
     return (
@@ -65,17 +107,58 @@ function AppContent() {
     );
   }
 
-  // Firebase user authenticated but hasn't completed onboarding
-  if (firebaseUser && !restaurantProfile?.hasCompletedOnboarding) {
+  // Show onboarding for new signups (custom auth, no Firebase)
+  if (showOnboarding) {
+    return (
+      <RestaurantOnboarding 
+        initialEmail={onboardingEmail}
+        initialPassword={onboardingPassword}
+        onComplete={(restaurantId, restaurantData, _masterPassword) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+          // Sign in the new user
+          setCurrentUser({
+            email: onboardingEmail,
+            password: onboardingPassword,
+            role: 'manager',
+            name: restaurantData.restaurantName + ' Manager',
+            restaurantId,
+            restaurantData,
+          });
+          setSelectedRestaurantId(restaurantId);
+          setShowOnboarding(false);
+          
+          // Show master password in toast (will be handled by onboarding component)
+        }}
+        onCancel={() => {
+          setShowOnboarding(false);
+          setAuthView('initial');
+        }}
+      />
+    );
+  }
+
+  // Firebase user authenticated but hasn't completed onboarding (managers only)
+  if (firebaseUser && detectedUserRole === 'manager' && !restaurantProfile?.hasCompletedOnboarding) {
     return <RestaurantOnboarding />;
   }
 
-  const handleDemoLogout = () => {
-    setCurrentUser(null);
+  // Show restaurant search modal for hosts who haven't selected a restaurant
+  if (firebaseUser && detectedUserRole === 'host' && !selectedRestaurantId && !showRestaurantSearch) {
+    setShowRestaurantSearch(true);
+  }
+
+  const handleRestaurantSelect = (restaurant: RestaurantSearchResult) => {
+    setSelectedRestaurantId(restaurant.id);
+    setShowRestaurantSearch(false);
   };
 
-  const handleFirebaseLogout = async () => {
-    await firebaseLogout();
+  const handleLogout = async () => {
+    // Handle both custom auth and Firebase auth logout
+    setCurrentUser(null);
+    setHostCredentials(null);
+    setSelectedRestaurantId(null);
+    if (firebaseUser) {
+      await firebaseLogout();
+    }
   };
 
   const handleGoogleSignIn = async () => {
@@ -131,8 +214,11 @@ function AppContent() {
     }
 
     try {
-      await signUpWithEmail(signupEmail, signupPassword, signupName);
-      setAuthView('initial');
+      // Store the email and password, then show onboarding
+      setOnboardingEmail(signupEmail);
+      setOnboardingPassword(signupPassword);
+      setShowOnboarding(true);
+      setIsSignupLoading(false);
     } catch (err) {
       console.error('Sign Up Error:', err);
       if (err instanceof Error) {
@@ -140,35 +226,63 @@ function AppContent() {
       } else {
         setError('Failed to create account');
       }
-    } finally {
       setIsSignupLoading(false);
     }
   };
 
-  const quickLogin = (role: UserRole) => {
-    const user = demoAccounts.find((acc) => acc.role === role);
-    if (user) {
-      setCurrentUser(user);
-    }
+
+
+  // Handler for host sign-in with master password
+  const handleHostSignIn = (restaurantId: string, email: string, name: string, role: 'host' | 'manager') => {
+    // Store the host/manager credentials
+    setHostCredentials({ restaurantId, email, name });
+    
+    // Create a user object (without Firebase authentication)
+    setCurrentUser({
+      email,
+      password: '', // Not needed for master password auth
+      role: role,
+      name,
+    });
+    
+    // Set the selected restaurant ID
+    setSelectedRestaurantId(restaurantId);
+    
+    // Reset the auth view
+    setAuthView('initial');
   };
 
-  // Determine which user is active (demo or Firebase)
+  // Determine which user is active (custom auth or Firebase)
   const activeUser = currentUser || (firebaseUser && restaurantProfile?.hasCompletedOnboarding ? {
     email: firebaseUser.email || '',
     role: 'manager' as UserRole,
     name: restaurantProfile?.displayName || firebaseUser.email || 'User',
   } : null);
 
-  // If user is logged in (demo or Firebase), show their appropriate interface
-  if (activeUser) {
-    const isDemoUser = !!currentUser; // Demo user if currentUser is set (via quickLogin)
+  // For Firebase hosts, create active user object if they have selected a restaurant
+  const firebaseHostUser = firebaseUser && detectedUserRole === 'host' && selectedRestaurantId ? {
+    email: firebaseUser.email || '',
+    role: 'host' as UserRole,
+    name: firebaseUser.displayName || firebaseUser.email || 'Host',
+  } : null;
+
+  const finalActiveUser = activeUser || firebaseHostUser;
+
+  // If user is logged in (custom auth or Firebase), show their appropriate interface
+  if (finalActiveUser) {
     const roleInfo = {
       host: { title: 'Host Dashboard', icon: Users, gradient: 'from-cyan-500 to-blue-500' },
       manager: { title: 'Manager Console', icon: BarChart3, gradient: 'from-blue-600 to-indigo-600' },
-    }[activeUser.role!];
+    }[finalActiveUser.role!];
 
-    const RoleIcon = roleInfo.icon;
     const isFirebaseUser = !!firebaseUser;
+
+    // Determine display info based on current view for managers
+    const isManager = finalActiveUser.role === 'manager';
+    const displayInfo = isManager && managerCurrentView === 'host' 
+      ? { title: 'Host Dashboard', icon: Users, gradient: 'from-cyan-500 to-blue-500' }
+      : roleInfo;
+    const DisplayIcon = displayInfo.icon;
 
     return (
       <>
@@ -181,27 +295,59 @@ function AppContent() {
                 <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
                   <motion.div
                     whileHover={{ scale: 1.05 }}
-                    className={`w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br ${roleInfo.gradient} rounded-lg flex items-center justify-center shadow-lg`}
+                    className={`w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br ${displayInfo.gradient} rounded-lg flex items-center justify-center shadow-lg`}
                   >
-                    <RoleIcon className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+                    <DisplayIcon className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
                   </motion.div>
                   <div>
                     <h1 className="text-base sm:text-lg md:text-xl text-slate-100">
                       {isFirebaseUser && restaurantProfile?.restaurantName ? restaurantProfile.restaurantName : 'ReserveAI'}
                     </h1>
-                    <p className="text-xs sm:text-sm text-slate-400">{roleInfo.title}</p>
+                    <p className="text-xs sm:text-sm text-slate-400">{displayInfo.title}</p>
                   </div>
                 </div>
                 
                 <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
+                  {/* View Switcher for Managers */}
+                  {isManager && (
+                    <div className="flex items-center gap-1 bg-slate-700/50 rounded-lg p-1">
+                      <Button
+                        variant={managerCurrentView === 'manager' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => setManagerCurrentView('manager')}
+                        className={`h-7 px-2 sm:px-3 text-xs ${
+                          managerCurrentView === 'manager' 
+                            ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md' 
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-600/50'
+                        }`}
+                      >
+                        <BarChart3 className="w-3 h-3 sm:mr-1.5" />
+                        <span className="hidden sm:inline">Manager</span>
+                      </Button>
+                      <Button
+                        variant={managerCurrentView === 'host' ? 'default' : 'ghost'}
+                        size="sm"
+                        onClick={() => setManagerCurrentView('host')}
+                        className={`h-7 px-2 sm:px-3 text-xs ${
+                          managerCurrentView === 'host' 
+                            ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-md' 
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-600/50'
+                        }`}
+                      >
+                        <Users className="w-3 h-3 sm:mr-1.5" />
+                        <span className="hidden sm:inline">Host</span>
+                      </Button>
+                    </div>
+                  )}
+                  
                   <div className="hidden sm:flex items-center gap-2 sm:gap-3 px-2 sm:px-3 md:px-4 py-1.5 sm:py-2 bg-slate-700/50 rounded-lg">
                     <User className="w-3 h-3 sm:w-4 sm:h-4 text-slate-400" />
-                    <span className="text-xs sm:text-sm text-slate-200">{activeUser.name}</span>
+                    <span className="text-xs sm:text-sm text-slate-200">{finalActiveUser.name}</span>
                   </div>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={isFirebaseUser ? handleFirebaseLogout : handleDemoLogout}
+                    onClick={handleLogout}
                     className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white h-8 sm:h-9 px-2 sm:px-3"
                   >
                     <LogOut className="w-3 h-3 sm:w-4 sm:h-4 sm:mr-2" />
@@ -212,10 +358,14 @@ function AppContent() {
             </div>
           </div>
           
-          {activeUser.role === 'manager' ? (
-            <ManagerApp isDemo={isDemoUser} />
+          {finalActiveUser.role === 'manager' ? (
+            managerCurrentView === 'manager' ? (
+              <ManagerApp />
+            ) : (
+              <HostSection />
+            )
           ) : (
-            <HostSection isDemo={isDemoUser} />
+            <HostSection />
           )}
         </div>
       </>
@@ -226,6 +376,18 @@ function AppContent() {
   return (
     <>
       <Toaster richColors position="top-right" />
+      
+      {/* Restaurant Search Modal for Hosts */}
+      {firebaseUser && detectedUserRole === 'host' && showRestaurantSearch && (
+        <RestaurantSearchModal
+          isOpen={showRestaurantSearch}
+          onClose={() => setShowRestaurantSearch(false)}
+          onSelectRestaurant={handleRestaurantSelect}
+          userEmail={firebaseUser.email || ''}
+          userRole="host"
+        />
+      )}
+      
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
         <div className="w-full max-w-6xl">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
@@ -309,7 +471,7 @@ function AppContent() {
                         </Button>
 
                         <Button
-                          onClick={() => setAuthView('signin')}
+                          onClick={() => setAuthView('hostsignin')}
                           variant="outline"
                           className="w-full h-14 border-slate-600 text-slate-100 hover:bg-slate-700 hover:text-white text-lg"
                         >
@@ -317,41 +479,7 @@ function AppContent() {
                         </Button>
                       </div>
 
-                      <div className="relative my-6">
-                        <div className="absolute inset-0 flex items-center">
-                          <div className="w-full border-t border-slate-700"></div>
-                        </div>
-                        <div className="relative flex justify-center text-sm">
-                          <span className="px-2 bg-slate-800 text-slate-400">or try demo</span>
-                        </div>
-                      </div>
 
-                      <div className="space-y-3">
-                        <p className="text-sm text-slate-400 text-center">Quick Access - Demo Accounts:</p>
-                        <div className="grid grid-cols-2 gap-3">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => quickLogin('host')}
-                            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-cyan-500"
-                          >
-                            <Users className="w-4 h-4 mr-2" />
-                            Host
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => quickLogin('manager')}
-                            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-indigo-500"
-                          >
-                            <BarChart3 className="w-4 h-4 mr-2" />
-                            Manager
-                          </Button>
-                        </div>
-                        <p className="text-xs text-slate-500 text-center">
-                          Password: <code className="text-slate-400">demo123</code>
-                        </p>
-                      </div>
                     </motion.div>
                   )}
 
@@ -508,29 +636,16 @@ function AppContent() {
                       </Button>
 
                       <div className="mt-6 pt-6 border-t border-slate-700">
-                        <p className="text-sm text-slate-400 mb-4">Quick Access - Demo Accounts:</p>
-                        <div className="grid grid-cols-2 gap-3">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => quickLogin('host')}
-                            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-cyan-500"
-                          >
-                            <Users className="w-4 h-4 mr-2" />
-                            Host
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => quickLogin('manager')}
-                            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-indigo-500"
-                          >
-                            <BarChart3 className="w-4 h-4 mr-2" />
-                            Manager
-                          </Button>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-4 text-center">
-                          All demo accounts use password: <code className="text-slate-400">demo123</code>
+                        <Button
+                          onClick={() => setAuthView('hostsignin')}
+                          variant="outline"
+                          className="w-full h-12 border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-blue-500"
+                        >
+                          <Building2 className="w-5 h-5 mr-2" />
+                          Search Restaurant to Sign In
+                        </Button>
+                        <p className="text-xs text-slate-500 text-center mt-3">
+                          Use this if you have a master password or normal password
                         </p>
                       </div>
                     </motion.div>
@@ -664,77 +779,22 @@ function AppContent() {
                         </Button>
                       </form>
 
-                      <div className="relative my-6">
-                        <div className="absolute inset-0 flex items-center">
-                          <div className="w-full border-t border-slate-700"></div>
-                        </div>
-                        <div className="relative flex justify-center text-sm">
-                          <span className="px-2 bg-slate-800 text-slate-400">or continue with</span>
-                        </div>
-                      </div>
+                    </motion.div>
+                  )}
 
-                      <Button
-                        onClick={handleGoogleSignIn}
-                        disabled={isGoogleLoading}
-                        className="w-full h-12 bg-white hover:bg-slate-100 text-slate-900 border border-slate-300"
-                        variant="outline"
-                      >
-                        {isGoogleLoading ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
-                            <span>Signing in...</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-3">
-                            <svg className="w-5 h-5" viewBox="0 0 24 24">
-                              <path
-                                fill="#4285F4"
-                                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                              />
-                              <path
-                                fill="#34A853"
-                                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                              />
-                              <path
-                                fill="#FBBC05"
-                                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
-                              />
-                              <path
-                                fill="#EA4335"
-                                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
-                              />
-                            </svg>
-                            <span>Continue with Google</span>
-                          </div>
-                        )}
-                      </Button>
-
-                      <div className="mt-6 pt-6 border-t border-slate-700">
-                        <p className="text-sm text-slate-400 mb-4">Quick Access - Demo Accounts:</p>
-                        <div className="grid grid-cols-2 gap-3">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => quickLogin('host')}
-                            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-cyan-500"
-                          >
-                            <Users className="w-4 h-4 mr-2" />
-                            Host
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => quickLogin('manager')}
-                            className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white hover:border-indigo-500"
-                          >
-                            <BarChart3 className="w-4 h-4 mr-2" />
-                            Manager
-                          </Button>
-                        </div>
-                        <p className="text-xs text-slate-500 text-center">
-                          Password: <code className="text-slate-400">demo123</code>
-                        </p>
-                      </div>
+                  {/* Host Sign In with Master Password View */}
+                  {authView === 'hostsignin' && (
+                    <motion.div
+                      key="hostsignin"
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <HostSignIn
+                        onHostSignIn={handleHostSignIn}
+                        onBack={() => setAuthView('initial')}
+                      />
                     </motion.div>
                   )}
                 </AnimatePresence>
