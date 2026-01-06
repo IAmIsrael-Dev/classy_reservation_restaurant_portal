@@ -2779,7 +2779,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
                           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 w-full lg:w-auto">
                             <Select
-                              value={selectedFloor?.id}
+                              value={selectedFloor?.id || ""}
                               onValueChange={(val) => {
                                 setSelectedFloor(
                                   floors.find(
@@ -3243,7 +3243,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                           <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 mb-4">
                             <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
                               <Select
-                                value={selectedFloor?.id}
+                                value={selectedFloor?.id || ""}
                                 onValueChange={(val) =>
                                   setSelectedFloor(
                                     floors.find(
@@ -5567,7 +5567,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                   )}
                   
                   <Select
-                    value={selectedMenuItem.category}
+                    value={selectedMenuItem.category || ""}
                     onValueChange={(value) =>
                       setSelectedMenuItem({
                         ...selectedMenuItem,
