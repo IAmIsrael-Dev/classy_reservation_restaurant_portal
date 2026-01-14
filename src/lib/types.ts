@@ -40,7 +40,7 @@ export interface RestaurantProfile {
   phone: string;
   address: string;
   city: string;
-  state: string;
+  state?: string;
   zipCode: string;
   
   // Onboarding Status

@@ -32,7 +32,7 @@ import {
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { toast } from "sonner";
-import { useMenuItems, useMenuCategories, useReservations, useTakeoutOrders, useFloors } from '../lib/firebase-hooks';
+import { useMenuItems, useMenuCategories, useReservations, useExperiences, useFloors } from '../lib/firebase-hooks';
 import { useAuth } from './auth-provider';
 import { ImageUpload } from './image-upload';
 import { uploadRestaurantProfileImage } from '../lib/firebase-storage';
@@ -87,8 +87,6 @@ import {
   Timer,
   Bell,
   ShoppingBag,
-  Package,
-  Truck,
   X,
   Copy,
   Check,
@@ -97,6 +95,7 @@ import {
   Columns,
   MessageSquare,
   Lock,
+  Sparkles,
 } from "lucide-react";
 import {
   BarChart,
@@ -134,13 +133,6 @@ type TableShape =
   | "l-shape";
 type TableStatus = "available" | "reserved" | "occupied" | "cleaning";
 type ReservationStatus = "waiting" | "seated" | "completed" | "cancelled";
-type OrderStatus =
-  | "pending"
-  | "confirmed"
-  | "preparing"
-  | "ready"
-  | "completed"
-  | "cancelled";
 type DayOfWeek =
   | "monday"
   | "tuesday"
@@ -212,26 +204,16 @@ interface MenuItem {
   takeoutAvailable?: boolean;
 }
 
-interface TakeoutOrder {
+interface Experience {
   id: string;
-  orderNumber: string;
-  customerName: string;
-  phone: string;
-  email: string;
-  items: OrderItem[];
-  total: number;
-  status: OrderStatus;
-  orderTime: string;
-  pickupTime: string;
-  notes?: string;
-}
-
-interface OrderItem {
-  menuItemId: string;
-  name: string;
-  quantity: number;
-  price: number;
-  specialInstructions?: string;
+  title: string;
+  description: string;
+  date: string; // ISO date string
+  startTime: string; // HH:MM format
+  endTime: string; // HH:MM format
+  capacity: number;
+  price?: number;
+  status: 'draft' | 'active' | 'inactive';
 }
 
 interface HoursOfOperation {
@@ -609,78 +591,6 @@ const mockMenu: MenuItem[] = [
     dietary: ["Vegetarian", "Vegan"],
     available: true,
     takeoutAvailable: true,
-  },
-];
-
-const mockTakeoutOrders: TakeoutOrder[] = [
-  {
-    id: "to-1",
-    orderNumber: "TO-1001",
-    customerName: "Jennifer Williams",
-    phone: "(555) 111-2222",
-    email: "jennifer@email.com",
-    items: [
-      {
-        menuItemId: "m-1",
-        name: "Grilled Salmon",
-        quantity: 2,
-        price: 28,
-      },
-      {
-        menuItemId: "m-4",
-        name: "Caesar Salad",
-        quantity: 1,
-        price: 14,
-      },
-    ],
-    total: 70,
-    status: "preparing",
-    orderTime: "2025-10-21T18:30:00Z",
-    pickupTime: "2025-10-21T19:15:00Z",
-  },
-  {
-    id: "to-2",
-    orderNumber: "TO-1002",
-    customerName: "Mark Thompson",
-    phone: "(555) 333-4444",
-    email: "mark@email.com",
-    items: [
-      {
-        menuItemId: "m-3",
-        name: "Pasta Carbonara",
-        quantity: 3,
-        price: 22,
-      },
-    ],
-    total: 66,
-    status: "ready",
-    orderTime: "2025-10-21T18:45:00Z",
-    pickupTime: "2025-10-21T19:30:00Z",
-  },
-  {
-    id: "to-3",
-    orderNumber: "TO-1003",
-    customerName: "Rachel Green",
-    phone: "(555) 555-6666",
-    email: "rachel@email.com",
-    items: [
-      {
-        menuItemId: "m-5",
-        name: "Lobster Risotto",
-        quantity: 1,
-        price: 38,
-      },
-      {
-        menuItemId: "m-4",
-        name: "Caesar Salad",
-        quantity: 2,
-        price: 14,
-      },
-    ],
-    total: 66,
-    status: "pending",
-    orderTime: "2025-10-21T19:00:00Z",
-    pickupTime: "2025-10-21T19:45:00Z",
   },
 ];
 
@@ -1314,7 +1224,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [waitlist, setWaitlist] = useState<WaitlistGuest[]>(isDemo ? mockWaitlist : []);
   const [menu, setMenu] = useState<MenuItem[]>([]);
-  const [takeoutOrders, setTakeoutOrders] = useState<TakeoutOrder[]>([]);
+  const [experiences, setExperiences] = useState<Experience[]>([]);
   const [scale, setScale] = useState(0.7);
   const [hours, setHours] =
     useState<HoursOfOperation[]>(defaultHours);
@@ -1325,6 +1235,16 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   const [menuCategories, setMenuCategories] = useState<string[]>([]);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showAddCategory, setShowAddCategory] = useState(false);
+  const [selectedExperience, setSelectedExperience] =
+    useState<Experience | null>(null);
+  const [isExperienceDialogOpen, setIsExperienceDialogOpen] =
+    useState(false);
+  
+  // Refs for date/time pickers
+  const expDateRef = useRef<HTMLInputElement>(null);
+  const expStartTimeRef = useRef<HTMLInputElement>(null);
+  const expEndTimeRef = useRef<HTMLInputElement>(null);
+  
   const [dineInView, setDineInView] = useState<
     "floor" | "list"
   >("floor");
@@ -1437,16 +1357,28 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   const firebaseMenuItems = useMenuItems();
   const firebaseCategories = useMenuCategories();
   const firebaseReservations = useReservations();
-  const firebaseTakeoutOrders = useTakeoutOrders();
+  const firebaseExperiences = useExperiences();
   const firebaseFloors = useFloors();
 
   // Set restaurant ID in localStorage for messaging and other services
   useEffect(() => {
     const restaurantId = selectedRestaurantId || user?.uid;
     if (restaurantId) {
+      console.log('[ManagerApp] Setting restaurant ID in localStorage:', restaurantId);
       localStorage.setItem('currentRestaurantId', restaurantId);
+      
+      // Manually refresh all Firebase hooks when restaurant ID becomes available
+      // This ensures data is loaded with the correct restaurantId
+      if (!isDemo) {
+        console.log('[ManagerApp] Refreshing Firebase data for restaurant:', restaurantId);
+        firebaseFloors.refresh();
+        firebaseMenuItems.refresh();
+        firebaseCategories.refresh();
+        firebaseReservations.refresh();
+        firebaseExperiences.refresh();
+      }
     }
-  }, [selectedRestaurantId, user]);
+  }, [selectedRestaurantId, user, isDemo]);
 
   // Load menu items from Firebase (only in realtime mode)
   useEffect(() => {
@@ -1496,15 +1428,15 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     }
   }, [firebaseReservations.reservations, firebaseReservations.loading, isDemo]);
 
-  // Load takeout orders from Firebase (only in realtime mode)
+  // Load experiences from Firebase (only in realtime mode)
   useEffect(() => {
-    if (!isDemo && !firebaseTakeoutOrders.loading) {
-      setTakeoutOrders(firebaseTakeoutOrders.takeoutOrders || []);
+    if (!isDemo && !firebaseExperiences.loading) {
+      setExperiences(firebaseExperiences.experiences || []);
     } else if (isDemo) {
-      // Demo mode - use mock data
-      setTakeoutOrders(mockTakeoutOrders);
+      // Demo mode - no mock data for now
+      setExperiences([]);
     }
-  }, [firebaseTakeoutOrders.takeoutOrders, firebaseTakeoutOrders.loading, isDemo]);
+  }, [firebaseExperiences.experiences, firebaseExperiences.loading, isDemo]);
 
   // Load floors from Firebase (only in realtime mode)
   useEffect(() => {
@@ -1649,11 +1581,11 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
         avgValueChange: 5.2,
         customerSatisfaction: 4.7,
         satisfactionChange: 3.1,
-        takeoutOrders: 287,
-        takeoutChange: 15.8,
+        experiencesCount: 12,
+        experiencesChange: 15.8,
       }
     : {
-        totalRevenue: takeoutOrders.reduce((sum, o) => sum + o.total, 0),
+        totalRevenue: 0, // No takeout orders anymore
         revenueChange: 0, // TODO: Calculate based on historical data
         totalReservations: reservations.length,
         reservationsChange: 0, // TODO: Calculate based on historical data
@@ -1661,16 +1593,14 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
         avgValueChange: 0, // TODO: Calculate based on historical data
         customerSatisfaction: restaurantInfo.rating,
         satisfactionChange: 0, // TODO: Calculate based on historical data
-        takeoutOrders: takeoutOrders.filter(o => o.status !== 'cancelled').length,
-        takeoutChange: 0, // TODO: Calculate based on historical data
+        experiencesCount: experiences.filter(e => e.status === 'active').length,
+        experiencesChange: 0, // TODO: Calculate based on historical data
       };
 
   // Calculate chart data based on mode (demo vs realtime)
   const chartRevenueData = isDemo
     ? revenueData
-    : [
-        { month: "This Month", revenue: takeoutOrders.reduce((sum, o) => sum + o.total, 0), dineIn: 0, takeout: takeoutOrders.reduce((sum, o) => sum + o.total, 0) }
-      ];
+    : [];
 
   const chartReservationSources = isDemo
     ? reservationSources
@@ -1710,25 +1640,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
 
   const chartTopDishes = isDemo
     ? topDishes
-    : (() => {
-        if (takeoutOrders.length === 0) return [];
-        // Calculate from takeout orders
-        const dishCounts: Record<string, { orders: number; revenue: number }> = {};
-        takeoutOrders.forEach(order => {
-          order.items.forEach(item => {
-            if (!dishCounts[item.name]) {
-              dishCounts[item.name] = { orders: 0, revenue: 0 };
-            }
-            dishCounts[item.name].orders += item.quantity;
-            dishCounts[item.name].revenue += item.price * item.quantity;
-          });
-        });
-        
-        return Object.entries(dishCounts)
-          .map(([name, data]) => ({ name, ...data }))
-          .sort((a, b) => b.orders - a.orders)
-          .slice(0, 5);
-      })();
+    : [];
 
   const handleSaveRestaurantInfo = async () => {
     if (isDemo) {
@@ -2233,20 +2145,6 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     }
   };
 
-  const handleUpdateOrderStatus = (
-    orderId: string,
-    newStatus: OrderStatus,
-  ) => {
-    setTakeoutOrders((orders) =>
-      orders.map((order) =>
-        order.id === orderId
-          ? { ...order, status: newStatus }
-          : order,
-      ),
-    );
-    toast.success(`Order ${newStatus}`);
-  };
-
   const handleAddMenuItem = () => {
     setSelectedMenuItem({
       id: "",
@@ -2349,22 +2247,107 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     }
   };
 
-  const getOrderStatusColor = (status: OrderStatus) => {
-    switch (status) {
-      case "pending":
-        return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
-      case "confirmed":
-        return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-      case "preparing":
-        return "bg-purple-500/20 text-purple-400 border-purple-500/30";
-      case "ready":
-        return "bg-green-500/20 text-green-400 border-green-500/30";
-      case "completed":
-        return "bg-slate-500/20 text-slate-400 border-slate-500/30";
-      case "cancelled":
-        return "bg-red-500/20 text-red-400 border-red-500/30";
-      default:
-        return "bg-slate-500/20 text-slate-400";
+  // Experience Handlers
+  const handleAddExperience = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    setSelectedExperience({
+      id: "",
+      title: "",
+      description: "",
+      date: tomorrow.toISOString().split('T')[0],
+      startTime: "18:00",
+      endTime: "21:00",
+      capacity: 20,
+      price: 0,
+      status: "draft",
+    });
+    setIsExperienceDialogOpen(true);
+  };
+
+  const handleEditExperience = (experience: Experience) => {
+    setSelectedExperience(experience);
+    setIsExperienceDialogOpen(true);
+  };
+
+  const handleSaveExperience = async () => {
+    if (!selectedExperience) return;
+
+    // Validation
+    if (!selectedExperience.title.trim()) {
+      toast.error('Please enter a title');
+      return;
+    }
+    if (!selectedExperience.description.trim()) {
+      toast.error('Please enter a description');
+      return;
+    }
+    if (selectedExperience.capacity <= 0) {
+      toast.error('Capacity must be greater than zero');
+      return;
+    }
+
+    // Validate future date/time
+    const experienceDateTime = new Date(`${selectedExperience.date}T${selectedExperience.startTime}`);
+    if (experienceDateTime <= new Date()) {
+      toast.error('Experience date and time must be in the future');
+      return;
+    }
+
+    try {
+      if (selectedExperience.id) {
+        // Update existing experience
+        await firebaseExperiences.updateExperience(selectedExperience.id, {
+          title: selectedExperience.title,
+          description: selectedExperience.description,
+          date: selectedExperience.date,
+          startTime: selectedExperience.startTime,
+          endTime: selectedExperience.endTime,
+          capacity: selectedExperience.capacity,
+          price: selectedExperience.price,
+          status: selectedExperience.status,
+        });
+        toast.success('Experience updated');
+      } else {
+        // Create new experience
+        await firebaseExperiences.createExperience({
+          title: selectedExperience.title,
+          description: selectedExperience.description,
+          date: selectedExperience.date,
+          startTime: selectedExperience.startTime,
+          endTime: selectedExperience.endTime,
+          capacity: selectedExperience.capacity,
+          price: selectedExperience.price,
+          status: selectedExperience.status,
+        });
+        toast.success('Experience created');
+      }
+      setIsExperienceDialogOpen(false);
+      setSelectedExperience(null);
+    } catch (error) {
+      console.error('Failed to save experience:', error);
+      toast.error('Failed to save experience');
+    }
+  };
+
+  const handleDeleteExperience = async (experienceId: string) => {
+    try {
+      await firebaseExperiences.deleteExperience(experienceId);
+      toast.success('Experience deleted');
+    } catch (error) {
+      console.error('Failed to delete experience:', error);
+      toast.error('Failed to delete experience');
+    }
+  };
+
+  const handleToggleExperienceStatus = async (experience: Experience) => {
+    try {
+      const newStatus = experience.status === 'active' ? 'inactive' : 'active';
+      await firebaseExperiences.updateExperience(experience.id, { status: newStatus });
+      toast.success(`Experience ${newStatus === 'active' ? 'activated' : 'deactivated'}`);
+    } catch (error) {
+      console.error('Failed to update experience status:', error);
+      toast.error('Failed to update experience status');
     }
   };
 
@@ -2422,11 +2405,11 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                   Dine-In
                 </TabsTrigger>
                 <TabsTrigger
-                  value="takeout"
+                  value="experiences"
                   className="data-[state=active]:bg-slate-700 whitespace-nowrap"
                 >
-                  <ShoppingBag className="w-4 h-4 mr-2" />
-                  Takeout
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Experiences
                 </TabsTrigger>
                 <TabsTrigger
                   value="listing"
@@ -2563,14 +2546,14 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                       </div>
                       <Badge className="bg-purple-500/20 text-purple-400 border-purple-500/30">
                         <TrendingUp className="w-3 h-3 mr-1" />
-                        {stats.takeoutChange}%
+                        {stats.experiencesChange}%
                       </Badge>
                     </div>
                     <div className="text-2xl sm:text-3xl text-slate-100 mb-1">
-                      {stats.takeoutOrders}
+                      {experiences.filter(e => e.status === 'active').length}
                     </div>
                     <div className="text-sm text-slate-400">
-                      Takeout Orders
+                      Active Experiences
                     </div>
                   </Card>
                 </motion.div>
@@ -2607,7 +2590,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                     <BarChart3 className="w-5 h-5 text-blue-400" />
                     Revenue by Channel
                   </h3>
-                  {chartRevenueData.length > 0 && chartRevenueData.some(d => ('dineIn' in d && d.dineIn > 0) || ('takeout' in d && d.takeout > 0)) ? (
+                  {chartRevenueData.length > 0 ? (
                     <ResponsiveContainer
                       width="100%"
                       height={250}
@@ -2629,14 +2612,8 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                         <Legend />
                         <Bar
                           dataKey="reservations"
-                          name="Dine-In"
+                          name="Reservations"
                           fill="#3b82f6"
-                          radius={[8, 8, 0, 0]}
-                        />
-                        <Bar
-                          dataKey="takeout"
-                          name="Takeout"
-                          fill="#8b5cf6"
                           radius={[8, 8, 0, 0]}
                         />
                       </BarChart>
@@ -3760,257 +3737,154 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
               )}
             </TabsContent>
 
-            {/* ===== TAKEOUT OPERATIONS TAB ===== */}
-            <TabsContent value="takeout" className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                <Card className="p-4 bg-slate-800 border-slate-700">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 bg-yellow-500/20 rounded-lg flex items-center justify-center">
-                      <Clock className="w-5 h-5 text-yellow-400" />
-                    </div>
-                    <div>
-                      <div className="text-2xl text-slate-100">
-                        {
-                          takeoutOrders.filter(
-                            (o) => o.status === "pending",
-                          ).length
-                        }
-                      </div>
-                      <div className="text-sm text-slate-400">
-                        Pending
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-
-                <Card className="p-4 bg-slate-800 border-slate-700">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 bg-purple-500/20 rounded-lg flex items-center justify-center">
-                      <Package className="w-5 h-5 text-purple-400" />
-                    </div>
-                    <div>
-                      <div className="text-2xl text-slate-100">
-                        {
-                          takeoutOrders.filter(
-                            (o) => o.status === "preparing",
-                          ).length
-                        }
-                      </div>
-                      <div className="text-sm text-slate-400">
-                        Preparing
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-
-                <Card className="p-4 bg-slate-800 border-slate-700">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 bg-green-500/20 rounded-lg flex items-center justify-center">
-                      <CheckCircle2 className="w-5 h-5 text-green-400" />
-                    </div>
-                    <div>
-                      <div className="text-2xl text-slate-100">
-                        {
-                          takeoutOrders.filter(
-                            (o) => o.status === "ready",
-                          ).length
-                        }
-                      </div>
-                      <div className="text-sm text-slate-400">
-                        Ready
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-
-                <Card className="p-4 bg-slate-800 border-slate-700">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 bg-blue-500/20 rounded-lg flex items-center justify-center">
-                      <DollarSign className="w-5 h-5 text-blue-400" />
-                    </div>
-                    <div>
-                      <div className="text-2xl text-slate-100">
-                        $
-                        {takeoutOrders
-                          .reduce((sum, o) => sum + o.total, 0)
-                          .toLocaleString()}
-                      </div>
-                      <div className="text-sm text-slate-400">
-                        Today's Total
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              </div>
-
-              {/* Active Orders */}
+            {/* ===== EXPERIENCES TAB ===== */}
+            <TabsContent value="experiences" className="space-y-6">
               <Card className="p-4 sm:p-6 bg-slate-800 border-slate-700">
-                <h3 className="text-lg sm:text-xl text-slate-100 mb-4 flex items-center gap-2">
-                  <ShoppingBag className="w-5 h-5 text-purple-400" />
-                  Active Takeout Orders
-                </h3>
-
-                <div className="space-y-4">
-                  {takeoutOrders
-                    .filter(
-                      (order) =>
-                        !["completed", "cancelled"].includes(
-                          order.status,
-                        ),
-                    )
-                    .map((order) => (
-                      <Card
-                        key={order.id}
-                        className="p-4 bg-slate-900 border-slate-700"
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
-                          <div>
-                            <div className="flex items-center gap-3 mb-2">
-                              <span className="text-lg text-slate-100">
-                                {order.orderNumber}
-                              </span>
-                              <Badge
-                                className={getOrderStatusColor(
-                                  order.status,
-                                )}
-                              >
-                                {order.status
-                                  .charAt(0)
-                                  .toUpperCase() +
-                                  order.status.slice(1)}
-                              </Badge>
-                            </div>
-                            <div className="text-sm text-slate-400">
-                              {order.customerName} •{" "}
-                              {order.phone}
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-xl text-green-400">
-                              ${order.total}
-                            </div>
-                            <div className="text-sm text-slate-400">
-                              Pickup:{" "}
-                              {new Date(
-                                order.pickupTime,
-                              ).toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Order Items */}
-                        <div className="space-y-2 mb-4">
-                          {order.items.map((item, idx) => (
-                            <div
-                              key={idx}
-                              className="flex items-center justify-between text-sm"
-                            >
-                              <span className="text-slate-300">
-                                {item.quantity}x {item.name}
-                              </span>
-                              <span className="text-slate-400">
-                                $
-                                {(
-                                  item.quantity * item.price
-                                ).toFixed(2)}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Action Buttons */}
-                        <div className="flex flex-wrap gap-2">
-                          {order.status === "pending" && (
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                handleUpdateOrderStatus(
-                                  order.id,
-                                  "confirmed",
-                                )
-                              }
-                              className="bg-blue-600 hover:bg-blue-700"
-                            >
-                              <Check className="w-4 h-4 mr-2" />
-                              Confirm
-                            </Button>
-                          )}
-                          {order.status === "confirmed" && (
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                handleUpdateOrderStatus(
-                                  order.id,
-                                  "preparing",
-                                )
-                              }
-                              className="bg-purple-600 hover:bg-purple-700"
-                            >
-                              <Package className="w-4 h-4 mr-2" />
-                              Start Preparing
-                            </Button>
-                          )}
-                          {order.status === "preparing" && (
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                handleUpdateOrderStatus(
-                                  order.id,
-                                  "ready",
-                                )
-                              }
-                              className="bg-green-600 hover:bg-green-700"
-                            >
-                              <CheckCircle2 className="w-4 h-4 mr-2" />
-                              Mark Ready
-                            </Button>
-                          )}
-                          {order.status === "ready" && (
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                handleUpdateOrderStatus(
-                                  order.id,
-                                  "completed",
-                                )
-                              }
-                              className="bg-slate-600 hover:bg-slate-700"
-                            >
-                              <Truck className="w-4 h-4 mr-2" />
-                              Complete Pickup
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="border-slate-600 text-slate-400"
-                          >
-                            <Phone className="w-4 h-4 mr-2" />
-                            Call
-                          </Button>
-                          {order.status !== "ready" && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                handleUpdateOrderStatus(
-                                  order.id,
-                                  "cancelled",
-                                )
-                              }
-                              className="border-red-600 text-red-400 hover:bg-red-600 hover:text-white"
-                            >
-                              <X className="w-4 h-4 mr-2" />
-                              Cancel
-                            </Button>
-                          )}
-                        </div>
-                      </Card>
-                    ))}
+                <div className="flex items-center justify-between mb-6">
+                  <h3 className="text-lg sm:text-xl text-slate-100 flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-purple-400" />
+                    Experiences
+                  </h3>
+                  <Button
+                    onClick={handleAddExperience}
+                    className="bg-purple-600 hover:bg-purple-700"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Experience
+                  </Button>
                 </div>
+
+                {experiences.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Sparkles className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+                    <p className="text-slate-400 mb-4">
+                      No experiences created yet
+                    </p>
+                    <p className="text-sm text-slate-500 mb-6">
+                      Create unique dining experiences like wine tastings, chef's tables, or special events
+                    </p>
+                    <Button
+                      onClick={handleAddExperience}
+                      variant="outline"
+                      className="border-purple-600 text-purple-400 hover:bg-purple-600 hover:text-white"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Create Your First Experience
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {experiences.map((experience) => {
+                      const experienceDate = new Date(experience.date);
+                      const isPast = experienceDate < new Date();
+                      
+                      return (
+                        <Card
+                          key={experience.id}
+                          className="p-4 bg-slate-900 border-slate-700"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <h4 className="text-lg text-slate-100 font-medium">
+                                  {experience.title}
+                                </h4>
+                                <Badge
+                                  className={
+                                    experience.status === "active"
+                                      ? "bg-green-500/20 text-green-400 border-green-500/30"
+                                      : experience.status === "inactive"
+                                        ? "bg-slate-500/20 text-slate-400 border-slate-500/30"
+                                        : "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
+                                  }
+                                >
+                                  {experience.status.charAt(0).toUpperCase() + experience.status.slice(1)}
+                                </Badge>
+                                {isPast && (
+                                  <Badge className="bg-red-500/20 text-red-400 border-red-500/30">
+                                    Past
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-sm text-slate-400 mb-3">
+                                {experience.description}
+                              </p>
+                              <div className="flex flex-wrap gap-4 text-sm text-slate-400">
+                                <div className="flex items-center gap-2">
+                                  <Calendar className="w-4 h-4" />
+                                  {new Date(experience.date).toLocaleDateString('en-US', {
+                                    weekday: 'short',
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                  })}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Clock className="w-4 h-4" />
+                                  {experience.startTime} - {experience.endTime}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Users className="w-4 h-4" />
+                                  {experience.capacity} guests
+                                </div>
+                                {experience.price !== undefined && experience.price > 0 && (
+                                  <div className="flex items-center gap-2">
+                                    <DollarSign className="w-4 h-4" />
+                                    ${experience.price} per person
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex sm:flex-col gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleEditExperience(experience)}
+                                className="border-slate-600 text-slate-400 hover:bg-slate-700"
+                              >
+                                <Edit2 className="w-4 h-4 sm:mr-0 mr-2" />
+                                <span className="sm:hidden">Edit</span>
+                              </Button>
+                              {!isPast && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleToggleExperienceStatus(experience)}
+                                  className={
+                                    experience.status === "active"
+                                      ? "border-slate-600 text-slate-400 hover:bg-slate-700"
+                                      : "border-green-600 text-green-400 hover:bg-green-600 hover:text-white"
+                                  }
+                                >
+                                  {experience.status === "active" ? (
+                                    <>
+                                      <Eye className="w-4 h-4 sm:mr-0 mr-2" />
+                                      <span className="sm:hidden">Deactivate</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <CheckCircle2 className="w-4 h-4 sm:mr-0 mr-2" />
+                                      <span className="sm:hidden">Activate</span>
+                                    </>
+                                  )}
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleDeleteExperience(experience.id)}
+                                className="border-red-600 text-red-400 hover:bg-red-600 hover:text-white"
+                              >
+                                <Trash2 className="w-4 h-4 sm:mr-0 mr-2" />
+                                <span className="sm:hidden">Delete</span>
+                              </Button>
+                            </div>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
               </Card>
             </TabsContent>
 
@@ -5476,11 +5350,11 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                       id="itemPrice"
                       type="number"
                       step="0.01"
-                      value={selectedMenuItem.price}
+                      value={selectedMenuItem.price || 0}
                       onChange={(e) =>
                         setSelectedMenuItem({
                           ...selectedMenuItem,
-                          price: parseFloat(e.target.value),
+                          price: parseFloat(e.target.value) || 0,
                         })
                       }
                       className="bg-slate-700 border-slate-600 text-slate-100"
@@ -5667,6 +5541,252 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
               >
                 <Save className="w-4 h-4 mr-2" />
                 Save Item
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Experience Create/Edit Dialog */}
+        <Dialog
+          open={isExperienceDialogOpen}
+          onOpenChange={setIsExperienceDialogOpen}
+        >
+          <DialogContent className="bg-slate-800 border-slate-700 text-slate-100 max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-semibold">
+                {selectedExperience?.id ? "Edit Experience" : "Create Experience"}
+              </DialogTitle>
+            </DialogHeader>
+
+            {selectedExperience && (
+              <div className="space-y-6 py-2">
+                {/* Basic Information Section */}
+                <div className="space-y-4">
+                  <div>
+                    <Label htmlFor="exp-title" className="text-slate-200 mb-2 block font-medium">
+                      Experience Title *
+                    </Label>
+                    <Input
+                      id="exp-title"
+                      value={selectedExperience.title}
+                      onChange={(e) =>
+                        setSelectedExperience({
+                          ...selectedExperience,
+                          title: e.target.value,
+                        })
+                      }
+                      placeholder="e.g., Wine Tasting Evening"
+                      className="bg-slate-700/50 border-slate-600 text-slate-100 focus:border-purple-500 focus:ring-purple-500/20"
+                    />
+                  </div>
+
+                  <div>
+                    <Label htmlFor="exp-description" className="text-slate-200 mb-2 block font-medium">
+                      Description *
+                    </Label>
+                    <Textarea
+                      id="exp-description"
+                      value={selectedExperience.description}
+                      onChange={(e) =>
+                        setSelectedExperience({
+                          ...selectedExperience,
+                          description: e.target.value,
+                        })
+                      }
+                      placeholder="Describe the experience in detail..."
+                      rows={4}
+                      className="bg-slate-700/50 border-slate-600 text-slate-100 focus:border-purple-500 focus:ring-purple-500/20 resize-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Date & Time Section */}
+                <div className="space-y-4 pt-2 border-t border-slate-700">
+                  <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Date & Time</h3>
+                  
+                  {/* Date Selector - Full Width Row */}
+                  <div>
+                    <Label className="text-slate-200 mb-2 block font-medium">
+                      Date *
+                    </Label>
+                    <div className="relative">
+                      <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10 pointer-events-none">
+                        <div className="w-10 h-10 bg-purple-600/20 rounded-lg flex items-center justify-center">
+                          <Calendar className="w-5 h-5 text-purple-400" />
+                        </div>
+                      </div>
+                      <input
+                        ref={expDateRef}
+                        type="date"
+                        value={selectedExperience.date}
+                        onChange={(e) =>
+                          setSelectedExperience({
+                            ...selectedExperience,
+                            date: e.target.value,
+                          })
+                        }
+                        className="w-full h-16 pl-16 pr-4 bg-slate-700/50 border border-slate-600 rounded-md text-slate-100 hover:bg-slate-700 hover:border-slate-500 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all text-base cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-100"
+                        style={{ colorScheme: 'dark' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Time Selectors - Two Column Row */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-6">
+                    {/* Start Time Selector */}
+                    <div>
+                      <Label className="text-slate-200 mb-2 block font-medium">
+                        Start Time *
+                      </Label>
+                      <div className="relative">
+                        <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10 pointer-events-none">
+                          <div className="w-10 h-10 bg-blue-600/20 rounded-lg flex items-center justify-center">
+                            <Clock className="w-5 h-5 text-blue-400" />
+                          </div>
+                        </div>
+                        <input
+                          ref={expStartTimeRef}
+                          type="time"
+                          value={selectedExperience.startTime}
+                          onChange={(e) =>
+                            setSelectedExperience({
+                              ...selectedExperience,
+                              startTime: e.target.value,
+                            })
+                          }
+                          className="w-full h-16 pl-16 pr-4 bg-slate-700/50 border border-slate-600 rounded-md text-slate-100 hover:bg-slate-700 hover:border-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-base cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-100"
+                          style={{ colorScheme: 'dark' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* End Time Selector */}
+                    <div>
+                      <Label className="text-slate-200 mb-2 block font-medium">
+                        End Time *
+                      </Label>
+                      <div className="relative">
+                        <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10 pointer-events-none">
+                          <div className="w-10 h-10 bg-blue-600/20 rounded-lg flex items-center justify-center">
+                            <Clock className="w-5 h-5 text-blue-400" />
+                          </div>
+                        </div>
+                        <input
+                          ref={expEndTimeRef}
+                          type="time"
+                          value={selectedExperience.endTime}
+                          onChange={(e) =>
+                            setSelectedExperience({
+                              ...selectedExperience,
+                              endTime: e.target.value,
+                            })
+                          }
+                          className="w-full h-16 pl-16 pr-4 bg-slate-700/50 border border-slate-600 rounded-md text-slate-100 hover:bg-slate-700 hover:border-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all text-base cursor-pointer [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-100"
+                          style={{ colorScheme: 'dark' }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Capacity & Pricing Section */}
+                <div className="space-y-4 pt-2 border-t border-slate-700">
+                  <h3 className="text-sm font-semibold text-slate-300 uppercase tracking-wide">Capacity & Pricing</h3>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="exp-capacity" className="text-slate-200 mb-2 block font-medium">
+                        Capacity (guests) *
+                      </Label>
+                      <Input
+                        id="exp-capacity"
+                        type="number"
+                        min="1"
+                        value={selectedExperience.capacity}
+                        onChange={(e) =>
+                          setSelectedExperience({
+                            ...selectedExperience,
+                            capacity: parseInt(e.target.value) || 0,
+                          })
+                        }
+                        className="bg-slate-700/50 border-slate-600 text-slate-100 focus:border-purple-500 focus:ring-purple-500/20"
+                      />
+                    </div>
+
+                    <div>
+                      <Label htmlFor="exp-price" className="text-slate-200 mb-2 block font-medium">
+                        Price per Person
+                      </Label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                        <Input
+                          id="exp-price"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={selectedExperience.price || ""}
+                          onChange={(e) =>
+                            setSelectedExperience({
+                              ...selectedExperience,
+                              price: e.target.value ? parseFloat(e.target.value) : undefined,
+                            })
+                          }
+                          placeholder="0.00"
+                          className="bg-slate-700/50 border-slate-600 text-slate-100 pl-8 focus:border-purple-500 focus:ring-purple-500/20"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Status Section */}
+                <div className="space-y-4 pt-2 border-t border-slate-700">
+                  <div>
+                    <Label htmlFor="exp-status" className="text-slate-200 mb-2 block font-medium">
+                      Status
+                    </Label>
+                    <select
+                      id="exp-status"
+                      value={selectedExperience.status}
+                      onChange={(e) =>
+                        setSelectedExperience({
+                          ...selectedExperience,
+                          status: e.target.value as 'draft' | 'active' | 'inactive',
+                        })
+                      }
+                      className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600 rounded-md text-slate-100 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 outline-none transition-all"
+                      style={{ paddingRight: '2.5rem' }}
+                    >
+                      <option value="draft">Draft</option>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                    <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
+                      <span className="inline-block w-1.5 h-1.5 bg-purple-500 rounded-full"></span>
+                      Only active experiences are visible to diners
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="gap-3 pt-4 border-t border-slate-700">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsExperienceDialogOpen(false);
+                  setSelectedExperience(null);
+                }}
+                className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-slate-100"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveExperience}
+                className="bg-purple-600 hover:bg-purple-700 text-white shadow-lg shadow-purple-500/20"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                Save Experience
               </Button>
             </DialogFooter>
           </DialogContent>

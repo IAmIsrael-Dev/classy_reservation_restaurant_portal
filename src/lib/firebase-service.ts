@@ -173,6 +173,21 @@ export interface OrderItem {
   specialInstructions?: string;
 }
 
+export interface Experience {
+  id: string;
+  title: string;
+  description: string;
+  date: string; // ISO date string
+  startTime: string; // HH:MM format
+  endTime: string; // HH:MM format
+  capacity: number;
+  price?: number;
+  status: 'draft' | 'active' | 'inactive';
+  restaurantId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Conversation {
   id: string;
   type: 'reservation' | 'general' | 'support' | 'ADMIN_RESTAURANT';
@@ -213,6 +228,7 @@ const COLLECTIONS = {
   RESTAURANT_OWNERS: 'restaurant-owners',
   RESERVATIONS: 'reservations',
   TAKEOUT_ORDERS: 'takeout-orders',
+  EXPERIENCES: 'experiences',
   CONVERSATIONS: 'conversations',
   // Note: messages are stored as a subcollection under conversations/{conversationId}/messages
 };
@@ -811,12 +827,15 @@ export const menuItemService = {
       const restaurantId = getCurrentRestaurantId();
       const now = Timestamp.now();
       
-      const docRef = await addDoc(collection(db, COLLECTIONS.MENU_ITEMS), {
+      // Remove undefined fields before sending to Firestore
+      const cleanedData = removeUndefined({
         ...itemData,
         restaurantId,
         createdAt: now,
         updatedAt: now,
       });
+      
+      const docRef = await addDoc(collection(db, COLLECTIONS.MENU_ITEMS), cleanedData);
       
       const newDoc = await getDoc(docRef);
       return parseDocument<MenuItem>(newDoc);
@@ -1228,6 +1247,132 @@ export const takeoutOrderService = {
       callback(orders);
     }, (error) => {
       console.error('Error in takeout order subscription:', error);
+      callback([]);
+    });
+    
+    return unsubscribe;
+  }
+};
+
+// ============================================================================
+// Experience Operations
+// ============================================================================
+
+export const experienceService = {
+  /**
+   * Get all experiences for current restaurant
+   */
+  async getAll(): Promise<Experience[]> {
+    try {
+      const restaurantId = getCurrentRestaurantId();
+      const q = query(
+        collection(db, COLLECTIONS.EXPERIENCES),
+        where('restaurantId', '==', restaurantId)
+      );
+      
+      const snapshot = await getDocs(q);
+      const experiences = snapshot.docs.map(doc => parseDocument<Experience>(doc, {
+        status: 'draft' as const,
+      }));
+      // Sort by date in memory to avoid index requirement
+      return experiences.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    } catch (error) {
+      console.error('Error fetching experiences:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Get experience by ID
+   */
+  async getById(id: string): Promise<Experience | null> {
+    try {
+      const docRef = doc(db, COLLECTIONS.EXPERIENCES, id);
+      const docSnap = await getDoc(docRef);
+      
+      if (docSnap.exists()) {
+        return parseDocument<Experience>(docSnap, { status: 'draft' as const });
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching experience:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Create new experience
+   */
+  async create(experienceData: Omit<Experience, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>): Promise<Experience | null> {
+    try {
+      const restaurantId = getCurrentRestaurantId();
+      const now = Timestamp.now();
+      
+      const docRef = await addDoc(collection(db, COLLECTIONS.EXPERIENCES), {
+        ...experienceData,
+        restaurantId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      
+      const newDoc = await getDoc(docRef);
+      return parseDocument<Experience>(newDoc, { status: 'draft' as const });
+    } catch (error) {
+      console.error('Error creating experience:', error);
+      return null;
+    }
+  },
+
+  /**
+   * Update experience
+   */
+  async update(id: string, updates: Partial<Experience>): Promise<boolean> {
+    try {
+      const docRef = doc(db, COLLECTIONS.EXPERIENCES, id);
+      await updateDoc(docRef, {
+        ...removeUndefined(updates),
+        updatedAt: Timestamp.now(),
+      });
+      return true;
+    } catch (error) {
+      console.error('Error updating experience:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Delete experience
+   */
+  async delete(id: string): Promise<boolean> {
+    try {
+      const docRef = doc(db, COLLECTIONS.EXPERIENCES, id);
+      await deleteDoc(docRef);
+      return true;
+    } catch (error) {
+      console.error('Error deleting experience:', error);
+      return false;
+    }
+  },
+
+  /**
+   * Subscribe to real-time updates
+   */
+  subscribe(callback: (experiences: Experience[]) => void): () => void {
+    const restaurantId = getCurrentRestaurantId();
+    const q = query(
+      collection(db, COLLECTIONS.EXPERIENCES),
+      where('restaurantId', '==', restaurantId)
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const experiences = snapshot.docs.map(doc => parseDocument<Experience>(doc, {
+        status: 'draft' as const,
+      }));
+      // Sort by date in memory to avoid index requirement
+      experiences.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      callback(experiences);
+    }, (error) => {
+      console.error('Error in experience subscription:', error);
       callback([]);
     });
     
@@ -2031,7 +2176,7 @@ export const restaurantSearchService = {
       cuisineType: string;
       address: string;
       city: string;
-      state: string;
+      state?: string;
       zipCode: string;
       phone: string;
       capacity?: number;

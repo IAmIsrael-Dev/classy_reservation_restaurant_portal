@@ -34,7 +34,6 @@ interface RestaurantData {
   cuisineType: string;
   address: string;
   city: string;
-  state: string;
   zipCode: string;
   phone: string;
   openingHours: {
@@ -58,27 +57,60 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  
+  // Opening hours state
+  const [openingHours, setOpeningHours] = useState<{
+    [key: string]: { open: string; close: string; isClosed: boolean };
+  }>({});
+  const [selectedDay, setSelectedDay] = useState('');
+  const [dayOpenTime, setDayOpenTime] = useState('11:00');
+  const [dayCloseTime, setDayCloseTime] = useState('22:00');
+  
   const [formData, setFormData] = useState({
     restaurantName: '',
     cuisineType: '',
     address: '',
     phone: '',
     city: '',
-    state: '',
     zipCode: '',
     capacity: '',
     description: '',
     website: '',
-    openingTime: '11:00',
-    closingTime: '22:00',
     profileImageUrl: '',
   });
 
   const totalSteps = 3;
   const progress = (step / totalSteps) * 100;
+  
+  const daysOfWeek = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  const availableDays = daysOfWeek.filter(day => !openingHours[day]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+  
+  const handleAddDay = () => {
+    if (selectedDay && dayOpenTime && dayCloseTime) {
+      setOpeningHours(prev => ({
+        ...prev,
+        [selectedDay]: {
+          open: dayOpenTime,
+          close: dayCloseTime,
+          isClosed: false
+        }
+      }));
+      setSelectedDay('');
+      setDayOpenTime('11:00');
+      setDayCloseTime('22:00');
+    }
+  };
+  
+  const handleRemoveDay = (day: string) => {
+    setOpeningHours(prev => {
+      const updated = { ...prev };
+      delete updated[day];
+      return updated;
+    });
   };
 
   const handleNext = () => {
@@ -97,22 +129,20 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
     setIsSubmitting(true);
     
     try {
-      // Build opening hours object
-      const openingHours = {
-        monday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
-        tuesday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
-        wednesday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
-        thursday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
-        friday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
-        saturday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
-        sunday: { open: formData.openingTime, close: formData.closingTime, isClosed: false },
-      };
+      // Use the opening hours from state
 
       // Custom auth mode: Create account without Firebase
       if (isCustomAuth && initialEmail && initialPassword) {
         // Hash the password
+        console.log('=== SIGNUP DEBUG ===');
+        console.log('[Signup] Email:', initialEmail);
+        console.log('[Signup] Password:', initialPassword);
+        
         const { hashPassword } = await import('../lib/password-utils');
         const passwordHash = await hashPassword(initialPassword);
+        
+        console.log('[Signup] Generated hash to store:', passwordHash);
+        console.log('[Signup] Creating restaurant account...');
 
         // Create restaurant account
         // Build restaurant data object, excluding undefined values
@@ -121,10 +151,9 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
           cuisineType: formData.cuisineType,
           address: formData.address,
           city: formData.city,
-          state: formData.state,
           zipCode: formData.zipCode,
           phone: formData.phone,
-          openingHours,
+          openingHours: openingHours,
         };
 
         // Only add optional fields if they have values
@@ -185,13 +214,12 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
           cuisineType: formData.cuisineType,
           address: formData.address,
           city: formData.city,
-          state: formData.state,
           zipCode: formData.zipCode,
           phone: formData.phone,
           capacity: formData.capacity ? parseInt(formData.capacity) : undefined,
           description: formData.description || undefined,
           website: formData.website || undefined,
-          openingHours,
+          openingHours: openingHours,
           photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
           hasCompletedOnboarding: true,
         });
@@ -228,8 +256,8 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
   };
 
   const isStep1Valid = formData.restaurantName && formData.cuisineType;
-  const isStep2Valid = formData.address && formData.city && formData.state && formData.zipCode;
-  const isStep3Valid = formData.phone && formData.capacity;
+  const isStep2Valid = formData.address && formData.city && formData.zipCode;
+  const isStep3Valid = formData.phone && formData.capacity && Object.keys(openingHours).length > 0;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black p-4">
@@ -369,30 +397,17 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="state" className="text-white">
-                      State
+                    <Label htmlFor="zipCode" className="text-white">
+                      ZIP Code
                     </Label>
                     <Input
-                      id="state"
-                      placeholder="NY"
-                      value={formData.state}
-                      onChange={(e) => handleInputChange('state', e.target.value)}
+                      id="zipCode"
+                      placeholder="10001"
+                      value={formData.zipCode}
+                      onChange={(e) => handleInputChange('zipCode', e.target.value)}
                       className="bg-zinc-900 border-zinc-800 text-white"
                     />
                   </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="zipCode" className="text-white">
-                    ZIP Code
-                  </Label>
-                  <Input
-                    id="zipCode"
-                    placeholder="10001"
-                    value={formData.zipCode}
-                    onChange={(e) => handleInputChange('zipCode', e.target.value)}
-                    className="bg-zinc-900 border-zinc-800 text-white"
-                  />
                 </div>
               </div>
 
@@ -454,32 +469,98 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="openingTime" className="text-white">
-                      Opening Time
-                    </Label>
-                    <Input
-                      id="openingTime"
-                      type="time"
-                      value={formData.openingTime}
-                      onChange={(e) => handleInputChange('openingTime', e.target.value)}
-                      className="bg-zinc-900 border-zinc-800 text-white"
-                    />
+                {/* Opening Hours Section */}
+                <div className="space-y-3 border-t border-zinc-800 pt-4">
+                  <Label className="text-white text-base">Opening Hours *</Label>
+                  <p className="text-xs text-zinc-400">Add the days and times your restaurant is open</p>
+                  
+                  {/* Day Selection Form */}
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="col-span-4 sm:col-span-1">
+                      <Select
+                        value={selectedDay}
+                        onValueChange={setSelectedDay}
+                        disabled={availableDays.length === 0}
+                      >
+                        <SelectTrigger className="bg-zinc-900 border-zinc-800 text-white">
+                          <SelectValue placeholder="Select day" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-zinc-900 border-zinc-800">
+                          {availableDays.map((day) => (
+                            <SelectItem key={day} value={day} className="text-white capitalize">
+                              {day.charAt(0).toUpperCase() + day.slice(1)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    <div className="col-span-2 sm:col-span-1">
+                      <Input
+                        type="time"
+                        value={dayOpenTime}
+                        onChange={(e) => setDayOpenTime(e.target.value)}
+                        placeholder="Open"
+                        className="bg-zinc-900 border-zinc-800 text-white"
+                      />
+                    </div>
+                    
+                    <div className="col-span-2 sm:col-span-1">
+                      <Input
+                        type="time"
+                        value={dayCloseTime}
+                        onChange={(e) => setDayCloseTime(e.target.value)}
+                        placeholder="Close"
+                        className="bg-zinc-900 border-zinc-800 text-white"
+                      />
+                    </div>
+                    
+                    <div className="col-span-4 sm:col-span-1">
+                      <Button
+                        type="button"
+                        onClick={handleAddDay}
+                        disabled={!selectedDay || !dayOpenTime || !dayCloseTime}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                      >
+                        Add
+                      </Button>
+                    </div>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="closingTime" className="text-white">
-                      Closing Time
-                    </Label>
-                    <Input
-                      id="closingTime"
-                      type="time"
-                      value={formData.closingTime}
-                      onChange={(e) => handleInputChange('closingTime', e.target.value)}
-                      className="bg-zinc-900 border-zinc-800 text-white"
-                    />
-                  </div>
+                  
+                  {/* Added Days List */}
+                  {Object.keys(openingHours).length > 0 && (
+                    <div className="space-y-2 mt-3">
+                      <Label className="text-zinc-400 text-sm">Added Days:</Label>
+                      <div className="space-y-2">
+                        {daysOfWeek
+                          .filter(day => openingHours[day])
+                          .map((day) => (
+                            <div
+                              key={day}
+                              className="flex items-center justify-between bg-zinc-900/50 border border-zinc-800 rounded-lg px-4 py-2"
+                            >
+                              <div className="flex items-center gap-3">
+                                <span className="text-white font-medium capitalize w-24">
+                                  {day.charAt(0).toUpperCase() + day.slice(1)}
+                                </span>
+                                <span className="text-zinc-400 text-sm">
+                                  {openingHours[day].open} - {openingHours[day].close}
+                                </span>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleRemoveDay(day)}
+                                className="text-red-400 hover:text-red-300 hover:bg-red-950/20"
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">

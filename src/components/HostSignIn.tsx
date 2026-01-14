@@ -101,6 +101,16 @@ export function HostSignIn({ onHostSignIn, onBack }: HostSignInProps) {
     setError('');
 
     try {
+      // DEBUG: Show what hash the entered password generates
+      console.log('=== SIGNIN DEBUG ===');
+      console.log('[Signin] Email entered:', hostEmail.trim());
+      console.log('[Signin] Password entered:', masterPassword.trim());
+      
+      const { hashPassword } = await import('../lib/password-utils');
+      const enteredPasswordHash = await hashPassword(masterPassword.trim());
+      console.log('[Signin] Hash of entered password:', enteredPasswordHash);
+      console.log('[Signin] Now verifying with database...');
+      
       // Verify host credentials
       const result = await restaurantSearchService.verifyHostCredentials(
         selectedRestaurant.id,

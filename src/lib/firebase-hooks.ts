@@ -14,6 +14,7 @@ import {
   menuCategoryService,
   reservationService,
   takeoutOrderService,
+  experienceService,
   conversationService,
   conversationMessageService,
   type Guest,
@@ -24,6 +25,7 @@ import {
   type MenuCategory,
   type Reservation,
   type TakeoutOrder,
+  type Experience,
   type Conversation,
   type ConversationMessage,
 } from './firebase-service';
@@ -174,13 +176,28 @@ export function useFloors() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log('[useFloors] Setting up subscription');
+    const restaurantId = localStorage.getItem('currentRestaurantId');
+    console.log('[useFloors] Current restaurant ID:', restaurantId);
+    
+    if (!restaurantId || restaurantId === 'demo-restaurant') {
+      console.log('[useFloors] No valid restaurant ID, skipping subscription');
+      setFloors([]);
+      setLoading(false);
+      return;
+    }
+    
     const unsubscribe = floorService.subscribe((data) => {
+      console.log('[useFloors] Received floors data:', data);
       setFloors(data);
       setLoading(false);
     });
 
-    return () => unsubscribe();
-  }, []);
+    return () => {
+      console.log('[useFloors] Cleaning up subscription');
+      unsubscribe();
+    };
+  }, []); // Add restaurantId dependency if we want to re-subscribe when it changes
 
   const createFloor = async (floorData: Omit<Floor, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
     try {
@@ -548,6 +565,89 @@ export function useTakeoutOrders() {
     createTakeoutOrder,
     updateTakeoutOrder,
     deleteTakeoutOrder,
+    refresh,
+  };
+}
+
+// ============================================================================
+// Experience Hooks
+// ============================================================================
+
+export function useExperiences() {
+  const [experiences, setExperiences] = useState<Experience[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    console.log('[useExperiences] Setting up subscription');
+    const restaurantId = localStorage.getItem('currentRestaurantId');
+    console.log('[useExperiences] Current restaurant ID:', restaurantId);
+    
+    if (!restaurantId || restaurantId === 'demo-restaurant') {
+      console.log('[useExperiences] No valid restaurant ID, skipping subscription');
+      setExperiences([]);
+      setLoading(false);
+      return;
+    }
+    
+    const unsubscribe = experienceService.subscribe((data) => {
+      console.log('[useExperiences] Received experiences data:', data);
+      setExperiences(data);
+      setLoading(false);
+    });
+
+    return () => {
+      console.log('[useExperiences] Cleaning up subscription');
+      unsubscribe();
+    };
+  }, []);
+
+  const createExperience = async (experienceData: Omit<Experience, 'id' | 'createdAt' | 'updatedAt' | 'restaurantId'>) => {
+    try {
+      return await experienceService.create(experienceData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create experience');
+      return null;
+    }
+  };
+
+  const updateExperience = async (id: string, updates: Partial<Experience>) => {
+    try {
+      return await experienceService.update(id, updates);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update experience');
+      return false;
+    }
+  };
+
+  const deleteExperience = async (id: string) => {
+    try {
+      return await experienceService.delete(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete experience');
+      return false;
+    }
+  };
+
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const data = await experienceService.getAll();
+      setExperiences(data);
+      setLoading(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch experiences');
+      setLoading(false);
+    }
+  };
+
+  return {
+    experiences,
+    loading,
+    error,
+    createExperience,
+    updateExperience,
+    deleteExperience,
     refresh,
   };
 }
