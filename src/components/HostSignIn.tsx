@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Building2, MapPin, ChefHat, Loader2, Mail, Key, ArrowRight } from 'lucide-react';
 import { restaurantSearchService, type RestaurantSearchResult } from '../lib/firebase-service';
 

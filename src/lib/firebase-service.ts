@@ -2176,8 +2176,7 @@ export const restaurantSearchService = {
       cuisineType: string;
       address: string;
       city: string;
-      state?: string;
-      zipCode: string;
+      country: string;
       phone: string;
       capacity?: number;
       description?: string;

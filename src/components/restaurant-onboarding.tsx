@@ -28,13 +28,36 @@ const RESTAURANT_TYPES = [
   'Other'
 ];
 
+const COUNTRIES = [
+  'United States',
+  'Canada',
+  'United Kingdom',
+  'Australia',
+  'Germany',
+  'France',
+  'Italy',
+  'Spain',
+  'Japan',
+  'China',
+  'India',
+  'Brazil',
+  'Mexico',
+  'Netherlands',
+  'Sweden',
+  'Switzerland',
+  'Singapore',
+  'United Arab Emirates',
+  'South Korea',
+  'Other'
+];
+
 // Type definition for restaurant data
 interface RestaurantData {
   restaurantName: string;
   cuisineType: string;
   address: string;
   city: string;
-  zipCode: string;
+  country: string;
   phone: string;
   openingHours: {
     [key: string]: { open: string; close: string; isClosed: boolean };
@@ -57,6 +80,7 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [customRestaurantType, setCustomRestaurantType] = useState('');
   
   // Opening hours state
   const [openingHours, setOpeningHours] = useState<{
@@ -72,7 +96,7 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
     address: '',
     phone: '',
     city: '',
-    zipCode: '',
+    country: '',
     capacity: '',
     description: '',
     website: '',
@@ -148,10 +172,10 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
         // Build restaurant data object, excluding undefined values
         const restaurantData: RestaurantData = {
           restaurantName: formData.restaurantName,
-          cuisineType: formData.cuisineType,
+          cuisineType: formData.cuisineType === 'Other' ? customRestaurantType : formData.cuisineType,
           address: formData.address,
           city: formData.city,
-          zipCode: formData.zipCode,
+          country: formData.country,
           phone: formData.phone,
           openingHours: openingHours,
         };
@@ -211,10 +235,10 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
 
         await updateRestaurantProfile({
           restaurantName: formData.restaurantName,
-          cuisineType: formData.cuisineType,
+          cuisineType: formData.cuisineType === 'Other' ? customRestaurantType : formData.cuisineType,
           address: formData.address,
           city: formData.city,
-          zipCode: formData.zipCode,
+          country: formData.country,
           phone: formData.phone,
           capacity: formData.capacity ? parseInt(formData.capacity) : undefined,
           description: formData.description || undefined,
@@ -255,8 +279,8 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
     }
   };
 
-  const isStep1Valid = formData.restaurantName && formData.cuisineType;
-  const isStep2Valid = formData.address && formData.city && formData.zipCode;
+  const isStep1Valid = formData.restaurantName && formData.cuisineType && (formData.cuisineType !== 'Other' || customRestaurantType);
+  const isStep2Valid = formData.address && formData.city && formData.country;
   const isStep3Valid = formData.phone && formData.capacity && Object.keys(openingHours).length > 0;
 
   return (
@@ -334,6 +358,15 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
                       ))}
                     </SelectContent>
                   </Select>
+                  {formData.cuisineType === 'Other' && (
+                    <Input
+                      id="customRestaurantType"
+                      placeholder="Enter your restaurant type"
+                      value={customRestaurantType}
+                      onChange={(e) => setCustomRestaurantType(e.target.value)}
+                      className="bg-zinc-900 border-zinc-800 text-white"
+                    />
+                  )}
                 </div>
               </div>
 
@@ -395,18 +428,25 @@ export function RestaurantOnboarding({ initialEmail, initialPassword, onComplete
                       className="bg-zinc-900 border-zinc-800 text-white"
                     />
                   </div>
-
                   <div className="space-y-2">
-                    <Label htmlFor="zipCode" className="text-white">
-                      ZIP Code
+                    <Label htmlFor="country" className="text-white">
+                      Country
                     </Label>
-                    <Input
-                      id="zipCode"
-                      placeholder="10001"
-                      value={formData.zipCode}
-                      onChange={(e) => handleInputChange('zipCode', e.target.value)}
-                      className="bg-zinc-900 border-zinc-800 text-white"
-                    />
+                    <Select
+                      value={formData.country}
+                      onValueChange={(value) => handleInputChange('country', value)}
+                    >
+                      <SelectTrigger className="bg-zinc-900 border-zinc-800 text-white">
+                        <SelectValue placeholder="Select country" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-zinc-900 border-zinc-800">
+                        {COUNTRIES.map((country) => (
+                          <SelectItem key={country} value={country} className="text-white">
+                            {country}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               </div>

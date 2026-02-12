@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
-import { DndProvider, useDrag, useDrop } from "react-dnd";
+import { DndProvider, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
@@ -73,8 +73,6 @@ import {
   Square,
   Circle,
   RectangleHorizontal,
-  Diamond,
-  Hexagon,
   ZoomIn,
   ZoomOut,
   ArrowLeft,
@@ -94,8 +92,8 @@ import {
   UserPlus,
   Columns,
   MessageSquare,
-  Lock,
   Sparkles,
+  Lock,
 } from "lucide-react";
 import {
   BarChart,
@@ -111,26 +109,10 @@ import {
   Legend,
 } from "recharts";
 import { ReservationKanbanView } from "./reservation-kanban-view";
+import { TableComponentOptimized } from "./table-component-new";
 
 // ===== TYPES =====
-type TableShape =
-  | "round"
-  | "square"
-  | "rectangular"
-  | "diamond"
-  | "oval"
-  | "hexagon"
-  | "booth"
-  | "bar"
-  | "banquet"
-  | "semicircle"
-  | "triangle"
-  | "octagon"
-  | "communal"
-  | "high-top"
-  | "booth-curved"
-  | "u-shape"
-  | "l-shape";
+type TableShape = "round" | "square" | "rectangular" | "oval";
 type TableStatus = "available" | "reserved" | "occupied" | "cleaning";
 type ReservationStatus = "waiting" | "seated" | "completed" | "cancelled";
 type DayOfWeek =
@@ -151,7 +133,8 @@ interface FloorTable {
   id: string;
   number: number;
   floorId: string;
-  capacity: number;
+  minCapacity: number;
+  maxCapacity: number;
   shape: TableShape;
   status: TableStatus;
   position: Position;
@@ -433,7 +416,8 @@ const mockFloors: Floor[] = [
         id: "t-1",
         number: 1,
         floorId: "floor-1",
-        capacity: 2,
+        minCapacity: 1,
+        maxCapacity: 2,
         shape: "round",
         status: "occupied",
         position: { x: 180, y: 150 },
@@ -444,7 +428,8 @@ const mockFloors: Floor[] = [
         id: "t-2",
         number: 2,
         floorId: "floor-1",
-        capacity: 4,
+        minCapacity: 2,
+        maxCapacity: 4,
         shape: "square",
         status: "available",
         position: { x: 340, y: 150 },
@@ -454,7 +439,8 @@ const mockFloors: Floor[] = [
         id: "t-3",
         number: 3,
         floorId: "floor-1",
-        capacity: 4,
+        minCapacity: 2,
+        maxCapacity: 4,
         shape: "square",
         status: "reserved",
         position: { x: 500, y: 150 },
@@ -466,7 +452,8 @@ const mockFloors: Floor[] = [
         id: "t-4",
         number: 4,
         floorId: "floor-1",
-        capacity: 6,
+        minCapacity: 4,
+        maxCapacity: 6,
         shape: "rectangular",
         status: "available",
         position: { x: 180, y: 300 },
@@ -476,7 +463,8 @@ const mockFloors: Floor[] = [
         id: "t-5",
         number: 5,
         floorId: "floor-1",
-        capacity: 4,
+        minCapacity: 2,
+        maxCapacity: 4,
         shape: "square",
         status: "occupied",
         position: { x: 340, y: 300 },
@@ -487,7 +475,8 @@ const mockFloors: Floor[] = [
         id: "t-6",
         number: 6,
         floorId: "floor-1",
-        capacity: 2,
+        minCapacity: 1,
+        maxCapacity: 2,
         shape: "round",
         status: "available",
         position: { x: 500, y: 300 },
@@ -506,7 +495,8 @@ const mockFloors: Floor[] = [
         id: "t-7",
         number: 7,
         floorId: "floor-2",
-        capacity: 4,
+        minCapacity: 2,
+        maxCapacity: 4,
         shape: "square",
         status: "available",
         position: { x: 260, y: 225 },
@@ -516,7 +506,8 @@ const mockFloors: Floor[] = [
         id: "t-8",
         number: 8,
         floorId: "floor-2",
-        capacity: 6,
+        minCapacity: 4,
+        maxCapacity: 6,
         shape: "rectangular",
         status: "reserved",
         position: { x: 440, y: 225 },
@@ -639,254 +630,10 @@ const defaultHours: HoursOfOperation[] = [
   },
 ];
 
-// ===== TABLE COMPONENT FOR FLOOR PLAN =====
-interface TableComponentProps {
-  table: FloorTable;
-  onClick: () => void;
-  onDrop?: (tableId: string, x: number, y: number) => void;
-  scale?: number;
-  selectedId?: string;
-  isEditMode?: boolean;
-}
-
-function TableComponent({
-  table,
-  onClick,
-  selectedId,
-  isEditMode = false,
-}: TableComponentProps) {
-  const [{ isDragging }, drag] = useDrag(
-    () => ({
-      type: "table",
-      item: {
-        id: table.id,
-        x: table.position.x,
-        y: table.position.y,
-      },
-      canDrag: isEditMode,
-      collect: (monitor) => ({
-        isDragging: monitor.isDragging(),
-      }),
-    }),
-    [table.id, table.position, isEditMode],
-  );
-
-  // Professional color system - Green (Available), Orange (Occupied), Blue/Gray (Reserved), Yellow (Cleaning)
-  const statusStyles = {
-    available: {
-      bg: "bg-gradient-to-br from-emerald-500/90 to-emerald-600/90",
-      border: "border-emerald-400/50",
-      shadow: "shadow-lg shadow-emerald-900/20",
-      hoverBg: "hover:from-emerald-500 hover:to-emerald-600",
-      text: "text-white",
-      indicator: "bg-emerald-300",
-      indicatorRing: "ring-emerald-400/40",
-    },
-    reserved: {
-      bg: "bg-gradient-to-br from-slate-600/90 to-slate-700/90",
-      border: "border-slate-500/50",
-      shadow: "shadow-lg shadow-slate-900/30",
-      hoverBg: "hover:from-slate-600 hover:to-slate-700",
-      text: "text-slate-100",
-      indicator: "bg-blue-400",
-      indicatorRing: "ring-blue-400/40",
-    },
-    occupied: {
-      bg: "bg-gradient-to-br from-orange-500/90 to-orange-600/90",
-      border: "border-orange-400/50",
-      shadow: "shadow-lg shadow-orange-900/20",
-      hoverBg: "hover:from-orange-500 hover:to-orange-600",
-      text: "text-white",
-      indicator: "bg-orange-300",
-      indicatorRing: "ring-orange-400/40",
-    },
-    cleaning: {
-      bg: "bg-gradient-to-br from-yellow-500/90 to-yellow-600/90",
-      border: "border-yellow-400/50",
-      shadow: "shadow-lg shadow-yellow-900/20",
-      hoverBg: "hover:from-yellow-500 hover:to-yellow-600",
-      text: "text-white",
-      indicator: "bg-yellow-300",
-      indicatorRing: "ring-yellow-400/40",
-    },
-  };
-
-  const shapeClasses = {
-    round: "rounded-full",
-    square: "rounded-2xl",
-    rectangular: "rounded-2xl",
-    diamond: "rounded-2xl",
-    oval: "rounded-full",
-    hexagon: "rounded-2xl",
-    booth: "rounded-3xl",
-    bar: "rounded-xl",
-    banquet: "rounded-2xl",
-    semicircle: "rounded-t-full rounded-b-md",
-    triangle: "rounded-2xl",
-    octagon: "rounded-3xl",
-    communal: "rounded-2xl",
-    "high-top": "rounded-2xl",
-    "booth-curved": "rounded-[2rem]",
-    "u-shape": "rounded-2xl",
-    "l-shape": "rounded-2xl",
-  };
-
-  const sizeMap = {
-    2: { width: 70, height: 70 },
-    4: { width: 90, height: 90 },
-    6: { width: 130, height: 90 },
-    8: { width: 150, height: 100 },
-  };
-
-  // Adjust size based on shape
-  let size =
-    sizeMap[table.capacity as keyof typeof sizeMap] ||
-    sizeMap[4];
-
-  // Special sizing for specific shapes
-  if (table.shape === "rectangular") {
-    size = {
-      width: size.width * 1.5,
-      height: size.height * 0.8,
-    }; // Long rectangular
-  } else if (table.shape === "oval") {
-    size = {
-      width: size.width * 1.3,
-      height: size.height * 0.9,
-    }; // Elongated oval
-  } else if (table.shape === "diamond") {
-    size = {
-      width: size.width * 1.1,
-      height: size.height * 1.1,
-    }; // Slightly larger diamond
-  } else if (table.shape === "hexagon") {
-    size = {
-      width: size.width * 1.2,
-      height: size.height * 1.1,
-    }; // Hexagonal shape
-  } else if (table.shape === "booth") {
-    size = {
-      width: size.width * 1.3,
-      height: size.height * 1.2,
-    }; // Wider and taller
-  } else if (table.shape === "bar") {
-    size = {
-      width: size.width * 1.8,
-      height: size.height * 0.6,
-    }; // Very wide, narrow
-  } else if (table.shape === "banquet") {
-    size = { width: size.width * 2, height: size.height * 0.8 }; // Long rectangular
-  } else if (table.shape === "semicircle") {
-    size = {
-      width: size.width * 1.2,
-      height: size.height * 0.8,
-    }; // Wider, shorter
-  } else if (table.shape === "triangle") {
-    size = {
-      width: size.width * 1.1,
-      height: size.height * 1.1,
-    }; // Slightly larger
-  } else if (table.shape === "communal") {
-    size = {
-      width: size.width * 2.5,
-      height: size.height * 1.2,
-    }; // Very long, wider
-  } else if (table.shape === "high-top") {
-    size = {
-      width: size.width * 0.8,
-      height: size.height * 0.8,
-    }; // Smaller
-  } else if (table.shape === "booth-curved") {
-    size = {
-      width: size.width * 1.4,
-      height: size.height * 1.3,
-    }; // Curved booth
-  } else if (table.shape === "u-shape") {
-    size = {
-      width: size.width * 1.6,
-      height: size.height * 1.4,
-    }; // U-shaped
-  } else if (table.shape === "l-shape") {
-    size = {
-      width: size.width * 1.5,
-      height: size.height * 1.3,
-    }; // L-shaped
-  }
-
-  // Apply scale multiplier (default 1.0)
-  const tableScale = table.scale || 1.0;
-  size = {
-    width: size.width * tableScale,
-    height: size.height * tableScale,
-  };
-
-  const isSelected = selectedId === table.id;
-  const currentStyle = statusStyles[table.status];
-
-  return (
-    <motion.div
-      ref={(node: HTMLDivElement | null) => {
-        if (isEditMode) {
-          drag(node);
-        }
-      }}
-      whileHover={{ scale: isEditMode ? 1.05 : 1.05, y: -2 }}
-      whileTap={{ scale: 0.96 }}
-      animate={{
-        rotate: table.rotation || 0,
-      }}
-      transition={{ duration: 0.2 }}
-      className={`absolute cursor-pointer transition-all duration-200 ${shapeClasses[table.shape]} ${currentStyle.bg} ${currentStyle.border} ${currentStyle.shadow} ${currentStyle.hoverBg} ${currentStyle.text} border-2 flex flex-col items-center justify-center overflow-hidden ${
-        isSelected
-          ? "ring-4 ring-blue-400/60 scale-110 shadow-2xl"
-          : ""
-      } ${isDragging ? "opacity-50" : "opacity-100"} ${isEditMode ? "cursor-move" : ""}`}
-      style={{
-        left: `${table.position.x}px`,
-        top: `${table.position.y}px`,
-        width: `${size.width}px`,
-        height: `${size.height}px`,
-        transformOrigin: "center center",
-      }}
-      onClick={onClick}
-    >
-      {/* Content container */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center">
-        {/* 3D depth effect - top highlight */}
-        <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/15 to-transparent rounded-[inherit]" />
-
-        {/* Table content container */}
-        <div className="relative z-10 flex flex-col items-center justify-center px-2">
-          {/* Table number label */}
-          <div className="text-base font-semibold tracking-tight drop-shadow-sm">
-            T{table.number}
-          </div>
-
-          {/* Capacity badge */}
-          <div className="mt-0.5 px-2 py-0.5 rounded-full bg-black/20 backdrop-blur-sm flex items-center gap-1">
-            <Users className="w-3 h-3 opacity-80" />
-            <span className="text-[10px] font-medium">
-              {table.capacity}
-            </span>
-          </div>
-        </div>
-
-        {/* Status indicator ring (top-right corner) */}
-        <div
-          className={`absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full ${currentStyle.indicator} ring-2 ${currentStyle.indicatorRing} shadow-sm`}
-        />
-
-        {/* Bottom shadow for depth */}
-        <div className="absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-black/15 to-transparent rounded-[inherit]" />
-      </div>
-    </motion.div>
-  );
-}
-
 // ===== DROPPABLE FLOOR CANVAS WITH PAN & ZOOM =====
 interface DroppableCanvasProps {
   children: React.ReactNode;
-  onDrop: (x: number, y: number) => void;
+  onDrop: (tableId: string, x: number, y: number) => void;
   scale: number;
   onScaleChange: (scale: number) => void;
 }
@@ -909,17 +656,33 @@ function DroppableCanvas({
   const [, drop] = useDrop(() => ({
     accept: "table",
     drop: (
-      item: { id: string; x: number; y: number },
+      item: { id: string; width: number; height: number },
       monitor,
     ) => {
-      const offset = monitor.getClientOffset();
-      if (offset && canvasRef.current) {
-        const canvasRect =
-          canvasRef.current.getBoundingClientRect();
-        // Adjust for pan and scale
-        const x = (offset.x - canvasRect.left - pan.x) / scale;
-        const y = (offset.y - canvasRect.top - pan.y) / scale;
-        onDrop(x, y);
+      const sourceOffset = monitor.getSourceClientOffset();
+      if (sourceOffset && canvasRef.current) {
+        const canvasRect = canvasRef.current.getBoundingClientRect();
+        
+        // Calculate position: where the top-left of dragged element is relative to canvas
+        const x = (sourceOffset.x - canvasRect.left - pan.x) / scale;
+        const y = (sourceOffset.y - canvasRect.top - pan.y) / scale;
+        
+        onDrop(item.id, x, y);
+      }
+    },
+    hover: (
+      item: { id: string; width: number; height: number },
+      monitor,
+    ) => {
+      // Update position in real-time during drag
+      const sourceOffset = monitor.getSourceClientOffset();
+      if (sourceOffset && canvasRef.current) {
+        const canvasRect = canvasRef.current.getBoundingClientRect();
+        
+        const x = (sourceOffset.x - canvasRect.left - pan.x) / scale;
+        const y = (sourceOffset.y - canvasRect.top - pan.y) / scale;
+        
+        onDrop(item.id, x, y);
       }
     },
   }));
@@ -1212,6 +975,17 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   const [selectedTable, setSelectedTable] =
     useState<FloorTable | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [draftLayout, setDraftLayout] = useState<FloorTable[] | null>(null); // Draft state for edit mode
+  const [layoutVersion, setLayoutVersion] = useState(0); // Force re-render with new keys
+  
+  // Get current layout - draft if in edit mode, otherwise actual floor layout
+  const currentLayout = React.useMemo(() => {
+    if (isEditMode && draftLayout) {
+      return draftLayout;
+    }
+    return selectedFloor?.layout || [];
+  }, [isEditMode, draftLayout, selectedFloor?.layout]);
+  
   const [isTableDetailOpen, setIsTableDetailOpen] =
     useState(false);
   const [isFloorDialogOpen, setIsFloorDialogOpen] =
@@ -1263,24 +1037,14 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       'round': 'round',
       'square': 'square',
       'oval': 'oval',
-      'booth': 'booth',
-      'bar': 'bar',
-      'banquet': 'banquet',
-      'semicircle': 'semicircle',
-      'triangle': 'triangle',
-      'octagon': 'octagon',
-      'communal': 'communal',
-      'high-top': 'high-top',
-      'booth-curved': 'booth-curved',
-      'u-shape': 'u-shape',
-      'l-shape': 'l-shape',
     };
 
     return {
       id: fbTable.id,
       number: fbTable.number,
       floorId: fbTable.floorId,
-      capacity: fbTable.capacity,
+      minCapacity: fbTable.capacity ? Math.max(1, fbTable.capacity - 2) : 2, // Estimate min
+      maxCapacity: fbTable.capacity || 4,
       shape: shapeMap[fbTable.shape] || 'rectangular',
       status: fbTable.status,
       position: fbTable.position,
@@ -1307,20 +1071,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       'rectangular': 'rectangle',
       'round': 'round',
       'square': 'square',
-      'diamond': 'square',
       'oval': 'oval',
-      'hexagon': 'octagon',
-      'booth': 'booth',
-      'bar': 'bar',
-      'banquet': 'banquet',
-      'semicircle': 'semicircle',
-      'triangle': 'triangle',
-      'octagon': 'octagon',
-      'communal': 'communal',
-      'high-top': 'high-top',
-      'booth-curved': 'booth-curved',
-      'u-shape': 'u-shape',
-      'l-shape': 'l-shape',
     };
 
     // Build the Firebase table object, only including defined fields
@@ -1329,7 +1080,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       id: table.id,
       number: table.number,
       floorId: table.floorId,
-      capacity: table.capacity,
+      capacity: table.maxCapacity, // Use maxCapacity for Firebase capacity field
       shape: shapeMap[table.shape],
       status: table.status,
       position: table.position,
@@ -1511,7 +1262,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
         name: restaurantProfile.restaurantName || prev.name,
         cuisine: restaurantProfile.cuisineType || prev.cuisine,
         description: restaurantProfile.description || prev.description,
-        address: `${restaurantProfile.address}, ${restaurantProfile.city}, ${restaurantProfile.state} ${restaurantProfile.zipCode}`,
+        address: `${restaurantProfile.address}, ${restaurantProfile.city}, ${restaurantProfile.country || ''}`,
         phone: restaurantProfile.phone || prev.phone,
         email: restaurantProfile.email || prev.email,
         // Convert Firebase RestaurantHours to local hours format
@@ -1548,7 +1299,9 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
   // Clear selected table if it doesn't belong to the current floor
   useEffect(() => {
     if (selectedTable && selectedFloor) {
-      const tableExistsInCurrentFloor = selectedFloor.layout.some(
+      // In edit mode, check against draftLayout; otherwise check against floor layout
+      const layoutToCheck = isEditMode && draftLayout ? draftLayout : selectedFloor.layout;
+      const tableExistsInCurrentFloor = layoutToCheck.some(
         (t) => t.id === selectedTable.id
       );
       if (!tableExistsInCurrentFloor) {
@@ -1556,7 +1309,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
         setIsTableDetailOpen(false);
       }
     }
-  }, [selectedFloor, selectedTable]);
+  }, [selectedFloor, selectedTable, isEditMode, draftLayout]);
 
   const [availabilitySettings, setAvailabilitySettings] =
     useState({
@@ -1665,7 +1418,6 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
       
       // Parse address back into components
       const addressParts = restaurantInfo.address.split(',').map(s => s.trim());
-      const stateZip = addressParts[addressParts.length - 1]?.split(' ') || [];
       
       // Check if using custom auth (selectedRestaurantId without Firebase user)
       if (selectedRestaurantId && !user) {
@@ -1678,8 +1430,6 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
           description: restaurantInfo.description,
           address: addressParts[0] || restaurantInfo.address,
           city: addressParts[1] || '',
-          state: stateZip[0] || '',
-          zipCode: stateZip[1] || '',
           phone: restaurantInfo.phone,
           photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
         });
@@ -1696,8 +1446,6 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
           description: restaurantInfo.description,
           address: addressParts[0] || restaurantInfo.address,
           city: addressParts[1] || '',
-          state: stateZip[0] || '',
-          zipCode: stateZip[1] || '',
           phone: restaurantInfo.phone,
           email: restaurantInfo.email,
           photos: uploadedImageUrl ? [uploadedImageUrl] : undefined,
@@ -1747,136 +1495,76 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
     }
   };
 
+  // Helper to update draft layout for a specific table
+  const updateDraftTable = (tableId: string, updates: Partial<FloorTable>) => {
+    setDraftLayout((prevDraft) => {
+      if (!prevDraft) return prevDraft;
+      
+      const updatedLayout = prevDraft.map((t) =>
+        t.id === tableId ? { ...t, ...updates } : t
+      );
+      
+      // Also update selected table with the complete updated table from draft
+      if (selectedTable?.id === tableId) {
+        const updatedTable = updatedLayout.find(t => t.id === tableId);
+        if (updatedTable) {
+          setSelectedTable(updatedTable);
+        }
+      }
+      
+      return updatedLayout;
+    });
+    setLayoutVersion(v => v + 1); // Increment version to force re-render
+  };
+
   // Table editing functions
-  const handleAddTable = async (shape: TableShape) => {
-    if (!selectedFloor) return;
+  const handleAddTable = (shape: TableShape) => {
+    if (!selectedFloor || !draftLayout) return;
 
     const newTable: FloorTable = {
       id: `t-new-${Date.now()}`,
       number:
         Math.max(
-          ...selectedFloor.layout.map((t) => t.number),
+          ...draftLayout.map((t) => t.number),
           0,
         ) + 1,
       floorId: selectedFloor.id,
-      capacity: 4,
+      minCapacity: 2,
+      maxCapacity: 4,
       shape,
       status: "available",
       position: { x: 350, y: 250 }, // Center of 800x600 canvas
       rotation: 0,
     };
 
-    try {
-      const updatedLayout = [...selectedFloor.layout, newTable];
-      
-      if (isDemo) {
-        // Demo mode - update local state only
-        const updatedFloors = floors.map((f) =>
-          f.id === selectedFloor.id
-            ? {
-                ...f,
-                layout: updatedLayout,
-                tableCount: f.tableCount + 1,
-              }
-            : f,
-        );
-        setFloors(updatedFloors);
-        setSelectedFloor(
-          updatedFloors.find((f) => f.id === selectedFloor.id) || null,
-        );
-      } else {
-        // Realtime mode - update floor in Firebase AND local state
-        const firebaseLayout = updatedLayout.map(convertComponentTableToFirebase);
-        await firebaseFloors.updateFloor(selectedFloor.id, {
-          layout: firebaseLayout as import('../lib/firebase-service').Table[],
-          tableCount: selectedFloor.tableCount + 1,
-          lastModified: new Date().toISOString(),
-        });
-        
-        // Also update local state immediately
-        const updatedFloors = floors.map((f) =>
-          f.id === selectedFloor.id
-            ? {
-                ...f,
-                layout: updatedLayout,
-                tableCount: f.tableCount + 1,
-                lastModified: new Date().toISOString(),
-              }
-            : f,
-        );
-        setFloors(updatedFloors);
-        setSelectedFloor(
-          updatedFloors.find((f) => f.id === selectedFloor.id) || null,
-        );
-      }
-      setSelectedTable(newTable);
-      toast.success(`New ${shape} table added`);
-    } catch (error) {
-      console.error('Error adding table:', error);
-      toast.error("Failed to add table");
-    }
+    // Update draft layout only - no Firebase save
+    const updatedLayout = [...draftLayout, newTable];
+    setDraftLayout(updatedLayout);
+    setLayoutVersion(v => v + 1); // Force re-render
+    
+    // Select the newly added table
+    setSelectedTable(newTable);
+    console.log('New table added and selected:', newTable.id, newTable.number);
+    
+    toast.success(`New ${shape} table added to draft`);
   };
 
-  const handleDeleteTable = async () => {
-    if (!selectedTable || !selectedFloor) return;
+  const handleDeleteTable = () => {
+    if (!selectedTable || !draftLayout) return;
 
-    try {
-      const updatedLayout = selectedFloor.layout.filter(
-        (t) => t.id !== selectedTable.id,
-      );
-      
-      if (isDemo) {
-        // Demo mode - update local state only
-        const updatedFloors = floors.map((f) =>
-          f.id === selectedFloor.id
-            ? {
-                ...f,
-                layout: updatedLayout,
-                tableCount: f.tableCount - 1,
-              }
-            : f,
-        );
-        setFloors(updatedFloors);
-        setSelectedFloor(
-          updatedFloors.find((f) => f.id === selectedFloor.id) || null,
-        );
-      } else {
-        // Realtime mode - update floor in Firebase AND local state
-        const firebaseLayout = updatedLayout.map(convertComponentTableToFirebase);
-        await firebaseFloors.updateFloor(selectedFloor.id, {
-          layout: firebaseLayout as import('../lib/firebase-service').Table[],
-          tableCount: selectedFloor.tableCount - 1,
-          lastModified: new Date().toISOString(),
-        });
-        
-        // Also update local state immediately
-        const updatedFloors = floors.map((f) =>
-          f.id === selectedFloor.id
-            ? {
-                ...f,
-                layout: updatedLayout,
-                tableCount: f.tableCount - 1,
-                lastModified: new Date().toISOString(),
-              }
-            : f,
-        );
-        setFloors(updatedFloors);
-        setSelectedFloor(
-          updatedFloors.find((f) => f.id === selectedFloor.id) || null,
-        );
-      }
-      setSelectedTable(null);
-      toast.success("Table deleted");
-    } catch (error) {
-      console.error('Error deleting table:', error);
-      toast.error("Failed to delete table");
-    }
+    const updatedLayout = draftLayout.filter(
+      (t) => t.id !== selectedTable.id,
+    );
+    setDraftLayout(updatedLayout);
+    setLayoutVersion(v => v + 1); // Force re-render
+    setSelectedTable(null);
+    toast.success("Table removed from draft");
   };
 
-  const handleMoveTable = async (
+  const handleMoveTable = (
     direction: "up" | "down" | "left" | "right",
   ) => {
-    if (!selectedTable || !selectedFloor) return;
+    if (!selectedTable) return;
 
     const moveAmount = 10;
     const newPosition = { ...selectedTable.position };
@@ -1896,143 +1584,132 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
         break;
     }
 
-    const updatedLayout = selectedFloor.layout.map((t) =>
-      t.id === selectedTable.id ? { ...t, position: newPosition } : t
-    );
-    
-    try {
-      await updateFloorLayout(selectedFloor.id, updatedLayout);
-      setSelectedTable({
-        ...selectedTable,
-        position: newPosition,
-      });
-    } catch (error) {
-      console.error('Error moving table:', error);
-      toast.error("Failed to move table");
-    }
+    updateDraftTable(selectedTable.id, { position: newPosition });
   };
 
-  const handleRotateTable = async () => {
-    if (!selectedTable || !selectedFloor) return;
-
-    const newRotation =
-      ((selectedTable.rotation || 0) + 45) % 360;
-
-    const updatedLayout = selectedFloor.layout.map((t) =>
-      t.id === selectedTable.id ? { ...t, rotation: newRotation } : t
-    );
-    
-    try {
-      await updateFloorLayout(selectedFloor.id, updatedLayout);
-      setSelectedTable({
-        ...selectedTable,
-        rotation: newRotation,
-      });
-    } catch (error) {
-      console.error('Error rotating table:', error);
-      toast.error("Failed to rotate table");
-    }
+  const handleRotateTable = () => {
+    if (!selectedTable) return;
+    const newRotation = ((selectedTable.rotation || 0) + 45) % 360;
+    updateDraftTable(selectedTable.id, { rotation: newRotation });
   };
 
-  const handleUpdateTableCapacity = async (capacity: number) => {
-    if (!selectedTable || !selectedFloor) return;
-
-    const updatedLayout = selectedFloor.layout.map((t) =>
-      t.id === selectedTable.id ? { ...t, capacity } : t
-    );
-    
-    try {
-      await updateFloorLayout(selectedFloor.id, updatedLayout);
-      setSelectedTable({ ...selectedTable, capacity });
-    } catch (error) {
-      console.error('Error updating table capacity:', error);
-      toast.error("Failed to update table capacity");
-    }
+  const handleUpdateTableCapacity = (minCapacity: number, maxCapacity: number) => {
+    if (!selectedTable) return;
+    updateDraftTable(selectedTable.id, { minCapacity, maxCapacity });
   };
 
-  const handleUpdateTableScale = async (scale: number) => {
-    if (!selectedTable || !selectedFloor) return;
-
-    // Clamp scale between 0.5 and 2.0
+  const handleUpdateTableScale = (scale: number) => {
+    if (!selectedTable) return;
     const clampedScale = Math.max(0.5, Math.min(2.0, scale));
+    updateDraftTable(selectedTable.id, { scale: clampedScale });
+  };
 
-    const updatedLayout = selectedFloor.layout.map((t) =>
-      t.id === selectedTable.id ? { ...t, scale: clampedScale } : t
-    );
-    
+  // Save draft layout to database
+  const handleSaveLayout = async () => {
+    if (!selectedFloor || !draftLayout) return;
+
     try {
-      await updateFloorLayout(selectedFloor.id, updatedLayout);
-      setSelectedTable({ ...selectedTable, scale: clampedScale });
+      if (isDemo) {
+        // Demo mode - update local state only
+        const updatedFloors = floors.map((f) =>
+          f.id === selectedFloor.id
+            ? {
+                ...f,
+                layout: draftLayout,
+                tableCount: draftLayout.length,
+              }
+            : f,
+        );
+        setFloors(updatedFloors);
+        setSelectedFloor({
+          ...selectedFloor,
+          layout: draftLayout,
+          tableCount: draftLayout.length,
+        });
+      } else {
+        // Realtime mode - save to Firebase
+        const firebaseLayout = draftLayout.map(convertComponentTableToFirebase);
+        await firebaseFloors.updateFloor(selectedFloor.id, {
+          layout: firebaseLayout as import('../lib/firebase-service').Table[],
+          tableCount: draftLayout.length,
+          lastModified: new Date().toISOString(),
+        });
+        
+        // Update local state
+        const updatedFloors = floors.map((f) =>
+          f.id === selectedFloor.id
+            ? {
+                ...f,
+                layout: draftLayout,
+                tableCount: draftLayout.length,
+                lastModified: new Date().toISOString(),
+              }
+            : f,
+        );
+        setFloors(updatedFloors);
+        setSelectedFloor({
+          ...selectedFloor,
+          layout: draftLayout,
+          tableCount: draftLayout.length,
+          lastModified: new Date().toISOString(),
+        });
+      }
+      
+      setDraftLayout(null);
+      setIsEditMode(false);
+      setSelectedTable(null);
+      toast.success("Floor plan saved successfully");
     } catch (error) {
-      console.error('Error updating table scale:', error);
-      toast.error("Failed to update table scale");
+      console.error('Error saving layout:', error);
+      toast.error("Failed to save floor plan");
     }
   };
 
-  const handleTableDrop = async (
+  // Cancel editing and discard draft
+  const handleCancelLayout = () => {
+    setDraftLayout(null);
+    setIsEditMode(false);
+    setSelectedTable(null);
+    toast.info("Changes discarded");
+  };
+
+  const handleTableDrop = (
     tableId: string,
     x: number,
     y: number,
   ) => {
     if (!selectedFloor) return;
 
-    // The DroppableCanvas already adjusts for scale, so we just need to constrain the position
+    // Round to nearest pixel for clean positioning
     const newPosition = {
-      x: Math.max(0, Math.min(800 - 150, x)),
-      y: Math.max(0, Math.min(600 - 100, y)),
+      x: Math.round(Math.max(0, Math.min(750, x))),
+      y: Math.round(Math.max(0, Math.min(550, y))),
     };
 
-    const updatedLayout = selectedFloor.layout.map((t) =>
-      t.id === tableId ? { ...t, position: newPosition } : t
-    );
-    
-    try {
-      await updateFloorLayout(selectedFloor.id, updatedLayout);
-      if (selectedTable?.id === tableId) {
-        setSelectedTable({
-          ...selectedTable,
-          position: newPosition,
-        });
-      }
-    } catch (error) {
-      console.error('Error moving table:', error);
-      toast.error("Failed to move table");
-    }
-  };
-
-  // Helper function to update floor layout in Firebase or local state
-  const updateFloorLayout = async (floorId: string, updatedLayout: FloorTable[]) => {
-    if (isDemo) {
-      // Demo mode - update local state only
-      const updatedFloors = floors.map((f) =>
-        f.id === floorId ? { ...f, layout: updatedLayout, lastModified: new Date().toISOString() } : f
-      );
-      setFloors(updatedFloors);
-      const updatedFloor = updatedFloors.find((f) => f.id === floorId);
-      if (updatedFloor) {
-        setSelectedFloor(updatedFloor);
-      }
-    } else {
-      // Realtime mode - update in Firebase AND local state (optimistic update)
-      const firebaseLayout = updatedLayout.map(convertComponentTableToFirebase);
-      await firebaseFloors.updateFloor(floorId, {
-        layout: firebaseLayout as import('../lib/firebase-service').Table[],
-        lastModified: new Date().toISOString(),
-      });
+    // Update draft layout only - use functional update to avoid stale state
+    setDraftLayout((prevDraft) => {
+      if (!prevDraft) return prevDraft;
       
-      // Also update local state immediately for responsive UI
-      const updatedFloors = floors.map((f) =>
-        f.id === floorId ? { ...f, layout: updatedLayout, lastModified: new Date().toISOString() } : f
+      const updatedLayout = prevDraft.map((t) =>
+        t.id === tableId ? { ...t, position: newPosition } : t
       );
-      setFloors(updatedFloors);
-      const updatedFloor = updatedFloors.find((f) => f.id === floorId);
-      if (updatedFloor) {
-        setSelectedFloor(updatedFloor);
+      
+      // Update selected table with complete data from draft
+      if (selectedTable?.id === tableId) {
+        const updatedTable = updatedLayout.find(t => t.id === tableId);
+        if (updatedTable) {
+          setSelectedTable(updatedTable);
+        }
       }
-    }
+      
+      return updatedLayout;
+    });
+    
+    setLayoutVersion(v => v + 1); // Force re-render
   };
 
   const handleTableClick = (table: FloorTable) => {
+    console.log('Table clicked:', table.id, table.number);
     setSelectedTable(table);
     if (!isEditMode) {
       setIsTableDetailOpen(true);
@@ -2768,7 +2445,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                                 setIsTableDetailOpen(false);
                               }}
                             >
-                              <SelectTrigger className="w-full sm:w-[160px] bg-slate-700 border-slate-600 text-slate-100">
+                              <SelectTrigger className="w-full sm:w-[180px] bg-slate-700 border-slate-600 text-slate-100">
                                 <SelectValue placeholder="Select Floor" />
                               </SelectTrigger>
                               <SelectContent className="bg-slate-800 border-slate-700">
@@ -2890,6 +2567,10 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                               size="sm"
                               onClick={() => {
                                 setIsEditMode(true);
+                                // Initialize draft layout with current floor layout
+                                if (selectedFloor) {
+                                  setDraftLayout([...selectedFloor.layout]);
+                                }
                                 // Clear selected table when entering edit mode
                                 setSelectedTable(null);
                                 setIsTableDetailOpen(false);
@@ -2933,10 +2614,11 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                                     height: "600px",
                                   }}
                                 >
-                                  {selectedFloor?.layout.map(
-                                    (table) => (
-                                      <TableComponent
-                                        key={table.id}
+                                  {selectedFloor?.layout
+                                    .filter((table) => table && table.id)
+                                    .map((table) => (
+                                      <TableComponentOptimized
+                                        key={`table-${table.id}`}
                                         table={table}
                                         onClick={() =>
                                           handleTableClick(
@@ -3015,7 +2697,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                                           <div className="flex items-center gap-1">
                                             <Users className="w-3 h-3" />
                                             <span>
-                                              {table.capacity}
+                                              {table.maxCapacity}
                                             </span>
                                           </div>
                                           {table.shape && (
@@ -3067,109 +2749,52 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                           <h3 className="text-sm text-slate-100 mb-3">
                             Add Tables
                           </h3>
-                          <ScrollArea className="h-[400px] pr-3">
-                            <div className="space-y-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleAddTable("round")
-                                }
-                                className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
-                              >
-                                <Circle className="w-4 h-4 mr-2" />
-                                Round
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleAddTable("square")
-                                }
-                                className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
-                              >
-                                <Square className="w-4 h-4 mr-2" />
-                                Square
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleAddTable("rectangular")
-                                }
-                                className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
-                              >
-                                <RectangleHorizontal className="w-4 h-4 mr-2" />
-                                Rectangle
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleAddTable("oval")
-                                }
-                                className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
-                              >
-                                <Circle className="w-4 h-4 mr-2" />
-                                Oval
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleAddTable("diamond")
-                                }
-                                className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
-                              >
-                                <Diamond className="w-4 h-4 mr-2" />
-                                Diamond
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleAddTable("hexagon")
-                                }
-                                className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
-                              >
-                                <Hexagon className="w-4 h-4 mr-2" />
-                                Hexagon
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleAddTable("booth")
-                                }
-                                className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
-                              >
-                                <Square className="w-4 h-4 mr-2" />
-                                Booth
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleAddTable("bar")
-                                }
-                                className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
-                              >
-                                <RectangleHorizontal className="w-4 h-4 mr-2" />
-                                Bar
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() =>
-                                  handleAddTable("banquet")
-                                }
-                                className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
-                              >
-                                <RectangleHorizontal className="w-4 h-4 mr-2" />
-                                Banquet
-                              </Button>
-                            </div>
-                          </ScrollArea>
+                          <div className="space-y-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleAddTable("round")
+                              }
+                              className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
+                            >
+                              <Circle className="w-4 h-4 mr-2" />
+                              Round
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleAddTable("square")
+                              }
+                              className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
+                            >
+                              <Square className="w-4 h-4 mr-2" />
+                              Square
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleAddTable("rectangular")
+                              }
+                              className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
+                            >
+                              <RectangleHorizontal className="w-4 h-4 mr-2" />
+                              Rectangle
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleAddTable("oval")
+                              }
+                              className="w-full border-slate-600 text-slate-300 hover:bg-slate-700 justify-start"
+                            >
+                              <Circle className="w-4 h-4 mr-2" />
+                              Oval
+                            </Button>
+                          </div>
                         </Card>
 
                         <Card className="p-4 bg-slate-800 border-slate-700">
@@ -3229,7 +2854,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                                   )
                                 }
                               >
-                                <SelectTrigger className="w-full sm:w-[160px] bg-slate-700 border-slate-600 text-slate-100">
+                                <SelectTrigger className="w-full sm:w-[180px] bg-slate-700 border-slate-600 text-slate-100">
                                   <SelectValue placeholder="Select Floor" />
                                 </SelectTrigger>
                                 <SelectContent className="bg-slate-800 border-slate-700">
@@ -3344,32 +2969,23 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                             <DroppableCanvas
                               scale={scale}
                               onScaleChange={setScale}
-                              onDrop={(x, y) => {
-                                if (selectedTable) {
-                                  handleTableDrop(
-                                    selectedTable.id,
-                                    x,
-                                    y,
-                                  );
-                                }
-                              }}
+                              onDrop={handleTableDrop}
                             >
-                              {selectedFloor?.layout.map(
-                                (table) => (
-                                  <TableComponent
-                                    key={table.id}
+                              {currentLayout
+                                .filter((table) => table && table.id)
+                                .map((table) => (
+                                  <TableComponentOptimized
+                                    key={`${table.id}-v${layoutVersion}`}
                                     table={table}
                                     onClick={() =>
                                       handleTableClick(table)
                                     }
-                                    onDrop={handleTableDrop}
                                     selectedId={
                                       selectedTable?.id
                                     }
                                     isEditMode={true}
                                   />
-                                ),
-                              )}
+                                ))}
                             </DroppableCanvas>
                           </div>
                         </Card>
@@ -3378,23 +2994,14 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                         <div className="flex justify-end gap-3">
                           <Button
                             variant="outline"
-                            onClick={() => {
-                              setIsEditMode(false);
-                              setSelectedTable(null);
-                            }}
+                            onClick={handleCancelLayout}
                             className="border-slate-600 text-slate-300"
                           >
                             <X className="w-4 h-4 mr-2" />
                             Cancel
                           </Button>
                           <Button
-                            onClick={() => {
-                              toast.success(
-                                "Floor plan saved successfully",
-                              );
-                              setIsEditMode(false);
-                              setSelectedTable(null);
-                            }}
+                            onClick={handleSaveLayout}
                             className="bg-blue-600 hover:bg-blue-700"
                           >
                             <Save className="w-4 h-4 mr-2" />
@@ -3412,37 +3019,43 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                               Table T{selectedTable.number}
                             </h3>
 
-                            {/* Capacity Selector */}
-                            <div className="mb-4">
-                              <Label className="text-xs text-slate-400 mb-2 block">
-                                Capacity
-                              </Label>
-                              <div className="grid grid-cols-4 gap-1">
-                                {[2, 4, 6, 8].map((cap) => (
-                                  <Button
-                                    key={cap}
-                                    variant={
-                                      selectedTable.capacity ===
-                                      cap
-                                        ? "default"
-                                        : "outline"
-                                    }
-                                    size="sm"
-                                    onClick={() =>
-                                      handleUpdateTableCapacity(
-                                        cap,
-                                      )
-                                    }
-                                    className={
-                                      selectedTable.capacity ===
-                                      cap
-                                        ? "bg-blue-600 hover:bg-blue-700 text-xs"
-                                        : "border-slate-600 text-slate-300 text-xs"
-                                    }
-                                  >
-                                    {cap}
-                                  </Button>
-                                ))}
+                            {/* Capacity Selectors */}
+                            <div className="mb-4 space-y-3">
+                              <div>
+                                <Label className="text-xs text-slate-400 mb-2 block">
+                                  Minimum Capacity
+                                </Label>
+                                <div className="grid grid-cols-4 gap-1">
+                                  {[1, 2, 3, 4].map((cap) => (
+                                    <Button
+                                      key={cap}
+                                      variant={selectedTable.minCapacity === cap ? "default" : "outline"}
+                                      size="sm"
+                                      onClick={() => handleUpdateTableCapacity(cap, Math.max(cap, selectedTable.maxCapacity))}
+                                      className={selectedTable.minCapacity === cap ? "bg-blue-600 hover:bg-blue-700 text-xs" : "border-slate-600 text-slate-300 text-xs"}
+                                    >
+                                      {cap}
+                                    </Button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div>
+                                <Label className="text-xs text-slate-400 mb-2 block">
+                                  Maximum Capacity
+                                </Label>
+                                <div className="grid grid-cols-4 gap-1">
+                                  {[1, 2, 3, 4].map((cap) => (
+                                    <Button
+                                      key={cap}
+                                      variant={selectedTable.maxCapacity === cap ? "default" : "outline"}
+                                      size="sm"
+                                      onClick={() => handleUpdateTableCapacity(Math.min(cap, selectedTable.minCapacity), cap)}
+                                      className={selectedTable.maxCapacity === cap ? "bg-blue-600 hover:bg-blue-700 text-xs" : "border-slate-600 text-slate-300 text-xs"}
+                                    >
+                                      {cap}
+                                    </Button>
+                                  ))}
+                                </div>
                               </div>
                             </div>
 
@@ -3618,7 +3231,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                               </div>
                               <div className="text-2xl flex items-center gap-2">
                                 <Users className="w-5 h-5" />
-                                {selectedTable.capacity}
+                                {selectedTable.maxCapacity}
                               </div>
                             </div>
                           </div>
@@ -3728,7 +3341,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                             : "waiting",
                     }))}
                     waitlist={waitlist}
-                    tables={floors.flatMap((f) => f.layout)}
+                    tables={floors.flatMap((f) => f.layout).map(t => ({ ...t, capacity: t.maxCapacity }))}
                     onReservationClick={(reservation) => {
                       setSelectedReservation(reservation);
                     }}

@@ -40,8 +40,7 @@ export interface RestaurantProfile {
   phone: string;
   address: string;
   city: string;
-  state?: string;
-  zipCode: string;
+  country: string;
   
   // Onboarding Status
   hasCompletedOnboarding: boolean;
@@ -84,8 +83,7 @@ export interface RestaurantProfileInput {
   phone?: string;
   address?: string;
   city?: string;
-  state?: string;
-  zipCode?: string;
+  country?: string;
   
   // Onboarding Status
   hasCompletedOnboarding?: boolean;
