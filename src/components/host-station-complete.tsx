@@ -21,6 +21,7 @@ import { useAuth } from './auth-provider';
 import { MessagingInbox } from './messaging-inbox';
 import { MessagingChat } from './messaging-chat';
 import type { Conversation } from '../lib/firebase-service';
+import { TableComponentOptimized } from './table-component-new';
 import {
   LayoutDashboard,
   List,
@@ -48,6 +49,8 @@ import {
   AlertCircle,
   ChevronRight,
   Search,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 
 // Types
@@ -78,6 +81,24 @@ interface Table {
   currentGuest?: string;
   shape: 'round' | 'square' | 'rectangle' | 'rectangular' | 'diamond' | 'oval' | 'hexagon' | 'booth' | 'bar' | 'banquet' | 'semicircle' | 'triangle' | 'octagon' | 'communal' | 'high-top' | 'booth-curved' | 'u-shape' | 'l-shape';
   floor: 'ground' | 'main' | 'upper' | 'rooftop';
+  scale?: number; // Table scale from backend
+  rotation?: number; // Table rotation from backend
+}
+
+// FloorTable interface matching manager-app structure for rendering
+interface FloorTable {
+  id: string;
+  number: number;
+  floorId: string;
+  minCapacity: number;
+  maxCapacity: number;
+  shape: 'round' | 'square' | 'rectangular' | 'oval';
+  status: 'available' | 'occupied' | 'reserved' | 'cleaning';
+  position: { x: number; y: number };
+  rotation?: number;
+  scale?: number;
+  reservationId?: string;
+  serverId?: string;
 }
 
 // Mock Data Generators
@@ -274,15 +295,16 @@ function DraggableGuestCard({ guest, onClick }: DraggableGuestCardProps) {
   );
 };
 
-// Droppable Table Component for Floor Plan
-interface DroppableTableProps {
+// DroppableTable component removed - now using TableComponentOptimized directly
+
+/* eslint-disable @typescript-eslint/no-unused-vars */
+// Unused function kept for reference but will be removed
+function DroppableTableUnused({ table, currentGuest, onDrop, onClick }: {
   table: Table;
   currentGuest?: Guest;
   onDrop: (guestId: string, tableId: number) => void;
   onClick: () => void;
-}
-
-function DroppableTable({ table, currentGuest, onDrop, onClick }: DroppableTableProps) {
+}) {
   const [{ isOver, canDrop }, drop] = useDrop(() => ({
     accept: 'GUEST',
     drop: (item: { id: string; guest: Guest }) => {
@@ -556,6 +578,115 @@ function DroppableTable({ table, currentGuest, onDrop, onClick }: DroppableTable
   );
 };
 
+// Pannable Canvas Component for Floor Plan View
+interface PannableCanvasProps {
+  children: React.ReactNode;
+  scale: number;
+  onScaleChange: (scale: number) => void;
+}
+
+function PannableCanvas({ children, scale, onScaleChange }: PannableCanvasProps) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const [pan, setPan] = React.useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = React.useState(false);
+  const [startPan, setStartPan] = React.useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = React.useState({ x: 0, y: 0 });
+  const [hasDragged, setHasDragged] = React.useState(false);
+  const [lastTouchDistance, setLastTouchDistance] = React.useState<number | null>(null);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Start panning on any mouse button
+    setIsPanning(true);
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setHasDragged(false);
+    setStartPan({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    
+    // Prevent default for middle click or modifier keys
+    if (e.button === 1 || e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (isPanning) {
+      const deltaX = Math.abs(e.clientX - dragStart.x);
+      const deltaY = Math.abs(e.clientY - dragStart.y);
+      const dragThreshold = 3; // pixels
+      
+      // Mark as dragged if moved more than threshold
+      if (deltaX > dragThreshold || deltaY > dragThreshold) {
+        setHasDragged(true);
+      }
+      
+      setPan({ x: e.clientX - startPan.x, y: e.clientY - startPan.y });
+    }
+  };
+
+  const handleMouseUp = () => {
+    setIsPanning(false);
+    setHasDragged(false);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      const distance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      setLastTouchDistance(distance);
+    } else if (e.touches.length === 1) {
+      setIsPanning(true);
+      setStartPan({ x: e.touches[0].clientX - pan.x, y: e.touches[0].clientY - pan.y });
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && lastTouchDistance !== null) {
+      const distance = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+      const delta = distance - lastTouchDistance;
+      const zoomDelta = delta > 0 ? 0.02 : -0.02;
+      const newScale = Math.max(0.3, Math.min(1.5, scale + zoomDelta));
+      onScaleChange(newScale);
+      setLastTouchDistance(distance);
+      e.preventDefault();
+    } else if (e.touches.length === 1 && isPanning) {
+      setPan({ x: e.touches[0].clientX - startPan.x, y: e.touches[0].clientY - startPan.y });
+      e.preventDefault();
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsPanning(false);
+    setLastTouchDistance(null);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const zoomDelta = e.deltaY > 0 ? -0.05 : 0.05;
+      const newScale = Math.max(0.3, Math.min(1.5, scale + zoomDelta));
+      onScaleChange(newScale);
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative w-full h-full overflow-hidden"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onWheel={handleWheel}
+      style={{ cursor: isPanning ? 'grabbing' : 'grab', touchAction: 'none' }}
+    >
+      <div className="absolute" style={{ width: '800px', height: '600px', transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: 'center center', left: '50%', top: '50%', marginLeft: '-400px', marginTop: '-300px' }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // Droppable Section Component
 interface DroppableSectionProps {
   status: Guest['status'];
@@ -652,6 +783,7 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
   const [showSeatConfirm, setShowSeatConfirm] = useState(false);
   const [guestToSeat, setGuestToSeat] = useState<Guest | null>(null);
   const [tableToSeat, setTableToSeat] = useState<Table | null>(null);
+  const [scale, setScale] = useState(0.7); // For floor plan zoom - matches manager default
 
   // Firebase integration
   const { user, selectedRestaurantId } = useAuth();
@@ -748,13 +880,15 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
     return {
       id: parseInt(fbTable.id.replace(/\D/g, ''), 10) || Math.floor(Math.random() * 1000),
       number: fbTable.number,
-      capacity: fbTable.capacity,
+      capacity: fbTable.capacity || 4, // Use capacity from Firebase
       status: fbTable.status,
-      section: fbTable.section,
+      section: floorName,
       position: fbTable.position,
-      currentGuest: fbTable.currentGuest,
+      currentGuest: undefined,
       shape: fbTable.shape as Table['shape'],
       floor: mappedFloor,
+      scale: fbTable.scale, // Preserve scale from backend
+      rotation: fbTable.rotation, // Preserve rotation from backend
     };
   };
 
@@ -908,16 +1042,8 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
     setGuestToRemove(null);
   };
 
-  const handleTableDrop = (guestId: string, tableNumber: number) => {
-    const guest = guests.find(g => g.id === guestId);
-    const table = tables.find(t => t.number === tableNumber);
-    
-    if (guest && table && table.status === 'available') {
-      setGuestToSeat(guest);
-      setTableToSeat(table);
-      setShowSeatConfirm(true);
-    }
-  };
+  // handleTableDrop removed - no longer using drag-and-drop for tables
+  // Tables now use click-to-select via TableComponentOptimized
 
   const confirmSeatGuest = async () => {
     if (!guestToSeat || !tableToSeat) return;
@@ -1007,14 +1133,11 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
   const waitlistGuests = guests.filter(g => g.status === 'waiting');
   const reservedGuests = guests.filter(g => g.status === 'reserved');
   
-  // Floor Plan Filtering - use actual floor data from selectedFloor
-  const floorTables = selectedFloor && selectedFloor.layout ? 
-    selectedFloor.layout.map(fbTable => convertFirebaseTable(fbTable, selectedFloor.name)) : 
-    [];
+  // Floor Plan Filtering - use actual floor data from selectedFloor (direct Firebase data, no conversion needed)
+  const floorTables = selectedFloor && selectedFloor.layout ? selectedFloor.layout : [];
   const filteredFloorTables = floorTables.filter(t => {
     const matchesSearch = tableSearchQuery === '' || 
-                         t.number.toString().includes(tableSearchQuery) ||
-                         t.section.toLowerCase().includes(tableSearchQuery.toLowerCase());
+                         t.number.toString().includes(tableSearchQuery);
     const matchesAvailable = !showOnlyAvailable || t.status === 'available';
     return matchesSearch && matchesAvailable;
   });
@@ -1394,29 +1517,94 @@ export default function HostStationComplete({ isDemo = false }: { isDemo?: boole
                       </div>
                     </div>
 
+                    {/* Zoom Controls */}
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="text-xs text-slate-400">Zoom:</span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setScale(Math.max(0.3, scale - 0.1))}
+                        className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                      >
+                        <ZoomOut className="w-4 h-4" />
+                      </Button>
+                      <span className="text-xs text-slate-300 min-w-[3rem] text-center">
+                        {Math.round(scale * 100)}%
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setScale(Math.min(1.5, scale + 0.1))}
+                        className="border-slate-600 text-slate-300 hover:bg-slate-700"
+                      >
+                        <ZoomIn className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setScale(0.7)}
+                        className="border-slate-600 text-slate-300 hover:bg-slate-700 text-xs"
+                      >
+                        Reset
+                      </Button>
+                    </div>
+
                     {/* Floor Plan Canvas */}
-                    <div className="relative bg-slate-900 rounded-lg p-6 h-[500px] border-2 border-slate-700 overflow-auto">
-                      <div className="relative w-[800px] h-[400px] mx-auto">
-                        {filteredFloorTables.map((table) => {
-                          const currentGuest = guests.find(g => g.tableNumber === table.number);
+                    <div className="relative bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl border-2 border-slate-700/50 overflow-hidden shadow-2xl" style={{ height: '500px' }}>
+                      <div className="absolute inset-0 bg-[linear-gradient(rgba(100,116,139,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(100,116,139,0.05)_1px,transparent_1px)] bg-[size:20px_20px]" />
+                      <PannableCanvas scale={scale} onScaleChange={setScale}>
+                        <div className="relative" style={{ width: '800px', height: '600px' }}>
+                          {filteredFloorTables.map((fbTable) => {
+                            // Use Firebase Table directly - no conversion needed!
+                            // Map shape names if needed
+                            const shapeMap: Record<string, 'round' | 'square' | 'rectangular' | 'oval'> = {
+                              'rectangle': 'rectangular',
+                              'round': 'round',
+                              'square': 'square',
+                              'oval': 'oval',
+                            };
+                            
+                            const floorTable: FloorTable = {
+                              ...fbTable,
+                              shape: shapeMap[fbTable.shape] || 'rectangular',
+                              minCapacity: fbTable.capacity ? Math.max(1, fbTable.capacity - 2) : 2,
+                              maxCapacity: fbTable.capacity || 4,
+                            };
+                            
+                            return (
+                              <TableComponentOptimized
+                                key={fbTable.id}
+                                table={floorTable}
+                                onClick={() => {
+                                  // Convert to legacy Table format for handleTableClick
+                                  const legacyTable: Table = {
+                                    id: parseInt(fbTable.id.replace(/\D/g, ''), 10) || Math.floor(Math.random() * 1000),
+                                    number: fbTable.number,
+                                    capacity: fbTable.capacity || 4,
+                                    status: fbTable.status,
+                                    section: selectedFloor?.name || '',
+                                    position: fbTable.position,
+                                    currentGuest: undefined,
+                                    shape: fbTable.shape as Table['shape'],
+                                    floor: 'main',
+                                    scale: fbTable.scale,
+                                    rotation: fbTable.rotation,
+                                  };
+                                  handleTableClick(legacyTable);
+                                }}
+                                selectedId={selectedTable?.id.toString()}
+                                isEditMode={false}
+                              />
+                            );
+                          })}
                           
-                          return (
-                            <DroppableTable
-                              key={table.id}
-                              table={table}
-                              currentGuest={currentGuest}
-                              onDrop={handleTableDrop}
-                              onClick={() => handleTableClick(table)}
-                            />
-                          );
-                        })}
-                        
-                        {filteredFloorTables.length === 0 && (
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <p className="text-slate-500">No tables found matching your criteria</p>
-                          </div>
-                        )}
-                      </div>
+                          {filteredFloorTables.length === 0 && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <p className="text-slate-500">No tables found matching your criteria</p>
+                            </div>
+                          )}
+                        </div>
+                      </PannableCanvas>
                     </div>
 
                     {/* Table Stats for Current Floor */}

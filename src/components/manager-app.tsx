@@ -649,9 +649,37 @@ function DroppableCanvas({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [startPan, setStartPan] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [hasDragged, setHasDragged] = useState(false);
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
   const [lastTouchDistance, setLastTouchDistance] = useState<
     number | null
   >(null);
+
+  // Track space bar for pan mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat) {
+        setIsSpacePressed(true);
+        e.preventDefault();
+      }
+    };
+    
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+        setIsPanning(false);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   const [, drop] = useDrop(() => ({
     accept: "table",
@@ -687,11 +715,18 @@ function DroppableCanvas({
     },
   }));
 
-  // Handle mouse pan
+  // Handle mouse pan - EDIT MODE: Space+drag, right-click, or middle-click only
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 1 || e.ctrlKey || e.metaKey) {
-      // Middle click or Ctrl+click for pan
+    // Allow panning only with:
+    // - Space + Left click (for table drag compatibility)
+    // - Middle click (button 1)
+    // - Right click (button 2)
+    const canPan = (isSpacePressed && e.button === 0) || e.button === 1 || e.button === 2;
+    
+    if (canPan) {
       setIsPanning(true);
+      setDragStart({ x: e.clientX, y: e.clientY });
+      setHasDragged(false);
       setStartPan({
         x: e.clientX - pan.x,
         y: e.clientY - pan.y,
@@ -702,6 +737,15 @@ function DroppableCanvas({
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isPanning) {
+      const deltaX = Math.abs(e.clientX - dragStart.x);
+      const deltaY = Math.abs(e.clientY - dragStart.y);
+      const dragThreshold = 3; // pixels
+      
+      // Mark as dragged if moved more than threshold
+      if (deltaX > dragThreshold || deltaY > dragThreshold) {
+        setHasDragged(true);
+      }
+      
       setPan({
         x: e.clientX - startPan.x,
         y: e.clientY - startPan.y,
@@ -709,8 +753,15 @@ function DroppableCanvas({
     }
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: React.MouseEvent) => {
+    // Prevent click events on child elements if we dragged
+    if (hasDragged && e.button === 0) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    
     setIsPanning(false);
+    setHasDragged(false);
   };
 
   // Handle touch gestures (pan and pinch zoom)
@@ -791,8 +842,9 @@ function DroppableCanvas({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onWheel={handleWheel}
+      onContextMenu={(e) => e.preventDefault()}
       style={{
-        cursor: isPanning ? "grabbing" : "grab",
+        cursor: isPanning ? "grabbing" : isSpacePressed ? "grab" : "default",
         touchAction: "none",
       }}
     >
@@ -835,25 +887,40 @@ function PannableCanvas({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [startPan, setStartPan] = useState({ x: 0, y: 0 });
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [hasDragged, setHasDragged] = useState(false);
   const [lastTouchDistance, setLastTouchDistance] = useState<
     number | null
   >(null);
 
-  // Handle mouse pan
+  // Handle mouse pan with left-click drag
   const handleMouseDown = (e: React.MouseEvent) => {
+    // Start panning on any mouse button
+    setIsPanning(true);
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setHasDragged(false);
+    setStartPan({
+      x: e.clientX - pan.x,
+      y: e.clientY - pan.y,
+    });
+    
+    // Prevent default for middle click or modifier keys
     if (e.button === 1 || e.ctrlKey || e.metaKey) {
-      // Middle click or Ctrl+click for pan
-      setIsPanning(true);
-      setStartPan({
-        x: e.clientX - pan.x,
-        y: e.clientY - pan.y,
-      });
       e.preventDefault();
     }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isPanning) {
+      const deltaX = Math.abs(e.clientX - dragStart.x);
+      const deltaY = Math.abs(e.clientY - dragStart.y);
+      const dragThreshold = 3; // pixels
+      
+      // Mark as dragged if moved more than threshold
+      if (deltaX > dragThreshold || deltaY > dragThreshold) {
+        setHasDragged(true);
+      }
+      
       setPan({
         x: e.clientX - startPan.x,
         y: e.clientY - startPan.y,
@@ -861,8 +928,15 @@ function PannableCanvas({
     }
   };
 
-  const handleMouseUp = () => {
+  const handleMouseUp = (e: React.MouseEvent) => {
+    // Prevent click events on child elements if we dragged
+    if (hasDragged && e.button === 0) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    
     setIsPanning(false);
+    setHasDragged(false);
   };
 
   // Handle touch gestures (pan and pinch zoom)
@@ -2952,8 +3026,7 @@ export function ManagerApp({ isDemo = false }: { isDemo?: boolean }) {
                                 variant="outline"
                                 className="hidden md:inline-flex bg-slate-700/50 text-slate-400 border-slate-600 text-xs"
                               >
-                                Pinch/Ctrl+Scroll to zoom • Drag
-                                to pan
+                                Space+Drag to pan • Ctrl+Scroll to zoom
                               </Badge>
                             </div>
                           </div>

@@ -31,7 +31,7 @@ const generateMasterPassword = (): string => {
 };
 
 export function HostManagement() {
-  const { user, restaurantProfile } = useAuth();
+  const { user, restaurantProfile, selectedRestaurantId } = useAuth();
   const [hosts, setHosts] = useState<HostEmployee[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newHostEmail, setNewHostEmail] = useState('');
@@ -53,7 +53,10 @@ export function HostManagement() {
   const handleAddHost = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!user?.uid) {
+    // Get restaurant ID from either Firebase auth or custom auth (master password)
+    const restaurantId = user?.uid || selectedRestaurantId;
+    
+    if (!restaurantId) {
       setError('You must be signed in to add hosts');
       return;
     }
@@ -64,10 +67,10 @@ export function HostManagement() {
 
     try {
       const masterPassword = generateMasterPassword();
-      const success = await restaurantSearchService.addHost(user.uid, {
+      const success = await restaurantSearchService.addHost(restaurantId, {
         email: newHostEmail.trim(),
         name: newHostName.trim(),
-        addedBy: user.uid,
+        addedBy: restaurantId,
         masterPassword: masterPassword,
       });
 
@@ -80,7 +83,7 @@ export function HostManagement() {
         setHostAdded(true);
         
         // Refresh the list
-        const restaurant = await restaurantSearchService.getById(user.uid);
+        const restaurant = await restaurantSearchService.getById(restaurantId);
         if (restaurant?.authorizedHosts) {
           setHosts(restaurant.authorizedHosts as HostEmployee[]);
         }
@@ -96,7 +99,8 @@ export function HostManagement() {
   };
 
   const handleRemoveHost = async (hostEmail: string) => {
-    if (!user?.uid) return;
+    const restaurantId = user?.uid || selectedRestaurantId;
+    if (!restaurantId) return;
     if (!confirm(`Are you sure you want to remove this host?`)) return;
 
     setIsLoading(true);
@@ -104,13 +108,13 @@ export function HostManagement() {
     setSuccessMessage('');
 
     try {
-      const success = await restaurantSearchService.removeHost(user.uid, hostEmail);
+      const success = await restaurantSearchService.removeHost(restaurantId, hostEmail);
       
       if (success) {
         setSuccessMessage('Host removed successfully');
         
         // Refresh the list
-        const restaurant = await restaurantSearchService.getById(user.uid);
+        const restaurant = await restaurantSearchService.getById(restaurantId);
         if (restaurant?.authorizedHosts) {
           setHosts(restaurant.authorizedHosts as HostEmployee[]);
         }
@@ -126,7 +130,8 @@ export function HostManagement() {
   };
 
   const handleToggleStatus = async (hostEmail: string, currentStatus: 'active' | 'inactive') => {
-    if (!user?.uid) return;
+    const restaurantId = user?.uid || selectedRestaurantId;
+    if (!restaurantId) return;
 
     setIsLoading(true);
     setError('');
@@ -135,13 +140,13 @@ export function HostManagement() {
     const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
 
     try {
-      const success = await restaurantSearchService.updateHostStatus(user.uid, hostEmail, newStatus);
+      const success = await restaurantSearchService.updateHostStatus(restaurantId, hostEmail, newStatus);
       
       if (success) {
         setSuccessMessage(`Host ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`);
         
         // Refresh the list
-        const restaurant = await restaurantSearchService.getById(user.uid);
+        const restaurant = await restaurantSearchService.getById(restaurantId);
         if (restaurant?.authorizedHosts) {
           setHosts(restaurant.authorizedHosts as HostEmployee[]);
         }
